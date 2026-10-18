@@ -1,0 +1,209 @@
+/* ダッシュボードのクライアント。API から JSON を取り、横棒(積み上げ)と表を描く。 */
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const SERIES = [
+    { key: 'cacheRead', label: 'キャッシュ読取', cls: 'cacheRead' },
+    { key: 'cacheCreation', label: 'キャッシュ作成', cls: 'cacheCreation' },
+    { key: 'input', label: '入力', cls: 'input' },
+    { key: 'output', label: '出力', cls: 'output' },
+  ];
+  const state = { project: '', sinceDays: '', sort: 'total', limit: 50, overview: null };
+
+  const fmt = (n) => {
+    if (n == null) return '–';
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'K';
+    return String(n);
+  };
+  const full = (n) => (n == null ? '–' : n.toLocaleString('ja-JP'));
+  const when = (iso) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const projName = (key, cwd) => (cwd ? cwd.replace(/\\/g, '/').split('/').filter(Boolean).slice(-2).join('/') : key);
+
+  async function getJSON(url, opts) {
+    const r = await fetch(url, opts);
+    if (!r.ok) throw new Error(url + ' -> ' + r.status);
+    return r.json();
+  }
+  function sinceISO() {
+    if (!state.sinceDays) return '';
+    const d = new Date();
+    if (state.sinceDays === '1') d.setHours(0, 0, 0, 0);
+    else d.setDate(d.getDate() - Number(state.sinceDays));
+    return d.toISOString();
+  }
+
+  // ---- tooltip -------------------------------------------------------------
+  const tip = $('tooltip');
+  function showTip(e, html) {
+    tip.innerHTML = html;
+    tip.hidden = false;
+    moveTip(e);
+  }
+  function moveTip(e) {
+    const pad = 14;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    const r = tip.getBoundingClientRect();
+    if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+    if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  }
+  function hideTip() { tip.hidden = true; }
+  function usageTipHTML(title, u, extra = '') {
+    const rows = SERIES.map((s) => `<div class="row"><span><i class="sw seg ${s.cls}"></i>${s.label}</span><span>${full(u[s.key])}</span></div>`).join('');
+    return `<div class="tt-title">${esc(title)}</div>${rows}<div class="row"><span>合計</span><span><b>${full(u.total)}</b></span></div>${extra}`;
+  }
+
+  // ---- bar rows -----------------------------------------------------------
+  function stackedRow(label, sub, u, max, tipTitle, tipExtra, onClick) {
+    const lbl = document.createElement('div');
+    lbl.className = 'lbl' + (onClick ? ' clickable' : '');
+    lbl.innerHTML = esc(label) + (sub ? `<small>${esc(sub)}</small>` : '');
+    lbl.title = label;
+    if (onClick) lbl.addEventListener('click', onClick);
+    const track = document.createElement('div');
+    track.className = 'track';
+    const width = max > 0 ? (u.total / max) * 100 : 0;
+    track.style.width = Math.max(width, u.total > 0 ? 0.6 : 0) + '%';
+    for (const s of SERIES) {
+      if (!u[s.key]) continue;
+      const seg = document.createElement('div');
+      seg.className = 'seg ' + s.cls;
+      seg.style.flex = `${u[s.key]} 0 0`;
+      track.appendChild(seg);
+    }
+    const tipHTML = usageTipHTML(tipTitle || label, u, tipExtra);
+    track.addEventListener('mouseenter', (e) => showTip(e, tipHTML));
+    track.addEventListener('mousemove', moveTip);
+    track.addEventListener('mouseleave', hideTip);
+    const val = document.createElement('div');
+    val.className = 'val';
+    val.textContent = fmt(u.total);
+    return [lbl, track, val];
+  }
+  function renderBars(container, rows) {
+    container.innerHTML = '';
+    if (!rows.length) { container.innerHTML = '<div class="empty">データがありません</div>'; return; }
+    const frag = document.createDocumentFragment();
+    for (const els of rows) els.forEach((el) => frag.appendChild(el));
+    container.appendChild(frag);
+  }
+  function usageTable(headers, rows) {
+    const th = headers.map((h) => `<th class="${h.num ? 'num' : ''}">${esc(h.label)}</th>`).join('');
+    const body = rows.map((r) => '<tr>' + r.map((c, i) => `<td class="${headers[i].num ? 'num' : ''}">${esc(c)}</td>`).join('') + '</tr>').join('');
+    return `<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+  const usageCols = [{ label: 'キャッシュ読取', num: true }, { label: 'キャッシュ作成', num: true }, { label: '入力', num: true }, { label: '出力', num: true }, { label: '合計', num: true }];
+  const usageCells = (u) => [full(u.cacheRead), full(u.cacheCreation), full(u.input), full(u.output), full(u.total)];
+
+  // ---- sections -----------------------------------------------------------
+  function renderLegend() {
+    $('legend').innerHTML = SERIES.map((s) => `<span><i class="sw seg ${s.cls}"></i>${s.label}</span>`).join('');
+  }
+  function renderTiles(totals, promptsShown) {
+    const u = totals.usage;
+    const tiles = [
+      ['合計トークン', fmt(u.total), full(u.total)],
+      ['出力トークン', fmt(u.output), '応答として生成された分'],
+      ['キャッシュ読取', fmt(u.cacheRead), (u.total ? Math.round((u.cacheRead / u.total) * 100) : 0) + '% が再利用'],
+      ['指示の数', full(totals.prompts), `${full(totals.apiCalls)} API 応答`],
+      ['セッション', full(totals.sessions), promptsShown != null ? `表示中の指示 ${full(promptsShown)} 件` : ''],
+    ];
+    $('tiles').innerHTML = tiles.map(([l, v, n]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join('');
+  }
+  async function loadOverview() {
+    const o = await getJSON('/api/overview');
+    state.overview = o;
+    $('scanMeta').textContent = `${o.projectsDir} — ${o.scan ? `${o.scan.files} ファイル / ${o.scan.ms} ms` : '走査中'}`;
+    const sel = $('projectSel');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">すべて</option>' + o.projects.map((p) => `<option value="${esc(p.key)}">${esc(projName(p.key, p.cwd))} (${fmt(p.usage.total)})</option>`).join('');
+    sel.value = cur;
+    const max = Math.max(0, ...o.projects.map((p) => p.usage.total));
+    renderBars($('projectBars'), o.projects.map((p) => stackedRow(projName(p.key, p.cwd), `${p.sessions} セッション`, p.usage, max, p.cwd || p.key, `<div class="row"><span>指示</span><span>${full(p.prompts)}</span></div>`, () => { sel.value = p.key; onFilterChange(); })));
+    $('projectsTable').innerHTML = usageTable([{ label: 'プロジェクト' }, { label: 'セッション', num: true }, { label: '指示', num: true }, ...usageCols], o.projects.map((p) => [projName(p.key, p.cwd), full(p.sessions), full(p.prompts), ...usageCells(p.usage)]));
+    return o;
+  }
+  async function loadPrompts() {
+    const q = new URLSearchParams({ project: state.project, sort: state.sort, limit: state.limit, since: sinceISO() });
+    const r = await getJSON('/api/prompts?' + q);
+    const max = Math.max(0, ...r.prompts.map((p) => p.usage.total));
+    renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)}`, p.usage, max, p.text,
+      `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div><div class="row"><span>セッション</span><span>${esc(p.sessionTitle || '')}</span></div>`,
+      () => openSession(p.sessionId))));
+    $('promptsTable').innerHTML = usageTable([{ label: '日時' }, { label: '指示' }, { label: 'プロジェクト' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
+      r.prompts.map((p) => [when(p.timestamp), p.text, projName(p.projectKey, p.cwd), full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
+    return r;
+  }
+  async function loadSessions() {
+    const r = await getJSON('/api/sessions?' + new URLSearchParams({ project: state.project }));
+    const list = $('sessionList');
+    list.innerHTML = r.sessions.length ? '' : '<div class="empty">セッションがありません</div>';
+    for (const s of r.sessions) {
+      const el = document.createElement('div');
+      el.className = 'sess';
+      el.innerHTML = `<div class="t">${esc(s.title)}</div><div class="n">${fmt(s.usage.total)}</div><div class="d">${when(s.startedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件${s.error ? ' · 読込エラー' : ''}</div>`;
+      el.addEventListener('click', () => openSession(s.sessionId));
+      list.appendChild(el);
+    }
+  }
+  async function openSession(id) {
+    const s = await getJSON('/api/session?' + new URLSearchParams({ id }));
+    $('detailTitle').textContent = `セッション: ${s.title}`;
+    $('detailSub').textContent = `${when(s.startedAt)} 〜 ${when(s.endedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · 合計 ${full(s.usage.total)} トークン · ${Object.keys(s.models).join(', ')}`;
+    const max = Math.max(0, ...s.promptList.map((p) => p.usage.total));
+    renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, when(p.timestamp), p.usage, max, p.text,
+      `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div>`)));
+    $('detailTable').innerHTML = usageTable([{ label: '#', num: true }, { label: '日時' }, { label: '指示' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
+      s.promptList.map((p) => [p.index + 1, when(p.timestamp), p.text, full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
+    const card = $('sessionDetail');
+    card.hidden = false;
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ---- wiring -------------------------------------------------------------
+  async function onFilterChange() {
+    state.project = $('projectSel').value;
+    state.sinceDays = $('sinceSel').value;
+    state.sort = $('sortSel').value;
+    state.limit = Number($('limitSel').value);
+    document.body.style.opacity = '0.85';
+    try {
+      const [, r] = await Promise.all([loadSessions(), loadPrompts()]);
+      const o = state.overview;
+      const totals = state.project ? (() => { const p = o.projects.find((x) => x.key === state.project); return p ? { sessions: p.sessions, prompts: p.prompts, apiCalls: p.apiCalls, usage: p.usage } : o.totals; })() : o.totals;
+      renderTiles(totals, r.count);
+    } finally {
+      document.body.style.opacity = '';
+    }
+  }
+  async function refreshAll() {
+    try {
+      await loadOverview();
+      await onFilterChange();
+    } catch (e) {
+      $('scanMeta').textContent = '読み込みに失敗: ' + e.message;
+      console.error(e);
+    }
+  }
+  for (const id of ['projectSel', 'sinceSel', 'sortSel', 'limitSel']) $(id).addEventListener('change', onFilterChange);
+  $('rescanBtn').addEventListener('click', async () => {
+    $('rescanBtn').disabled = true;
+    try { await getJSON('/api/rescan', { method: 'POST' }); await refreshAll(); } finally { $('rescanBtn').disabled = false; }
+  });
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.toggle[data-target]');
+    if (!b) return;
+    const t = $(b.dataset.target);
+    const bars = b.closest('figure').querySelector('.bars');
+    t.hidden = !t.hidden;
+    bars.hidden = !t.hidden;
+    b.textContent = t.hidden ? '表で見る' : 'グラフで見る';
+  });
+  $('detailClose').addEventListener('click', () => { $('sessionDetail').hidden = true; });
+
+  renderLegend();
+  refreshAll();
+})();

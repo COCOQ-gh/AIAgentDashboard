@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Agent Dashboard</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>AI Agent Dashboard <span class="sub">Claude Code のトークン消費を指示ごとに見る</span></h1>
+  <div class="meta" id="scanMeta">読み込み中…</div>
+</header>
+
+<section class="filters" aria-label="フィルタ">
+  <label>プロジェクト
+    <select id="projectSel"><option value="">すべて</option></select>
+  </label>
+  <label>期間
+    <select id="sinceSel">
+      <option value="">全期間</option>
+      <option value="1">今日</option>
+      <option value="7">直近 7 日</option>
+      <option value="30">直近 30 日</option>
+      <option value="90">直近 90 日</option>
+    </select>
+  </label>
+  <label>並び
+    <select id="sortSel">
+      <option value="total">合計トークン</option>
+      <option value="output">出力トークン</option>
+      <option value="recent">新しい順</option>
+    </select>
+  </label>
+  <label>件数
+    <select id="limitSel">
+      <option value="20">20</option>
+      <option value="50" selected>50</option>
+      <option value="100">100</option>
+      <option value="300">300</option>
+    </select>
+  </label>
+  <button id="rescanBtn" type="button">再走査</button>
+</section>
+
+<main>
+  <section class="tiles" id="tiles" aria-label="合計"></section>
+
+  <figure class="card" id="promptsCard">
+    <figcaption>
+      <div class="cap-title">トークン消費の多い指示</div>
+      <div class="cap-sub">1 本 = 人間の 1 指示。その指示から次の指示までに発生した API 応答の usage 合計(サブエージェント含む)。</div>
+      <div class="legend" id="legend"></div>
+      <button type="button" class="toggle" data-target="promptsTable">表で見る</button>
+    </figcaption>
+    <div class="bars" id="promptBars"></div>
+    <div class="tableview" id="promptsTable" hidden></div>
+  </figure>
+
+  <div class="two">
+    <figure class="card" id="projectsCard">
+      <figcaption>
+        <div class="cap-title">プロジェクト別 合計トークン</div>
+        <button type="button" class="toggle" data-target="projectsTable">表で見る</button>
+      </figcaption>
+      <div class="bars single" id="projectBars"></div>
+      <div class="tableview" id="projectsTable" hidden></div>
+    </figure>
+
+    <figure class="card" id="sessionsCard">
+      <figcaption>
+        <div class="cap-title">セッション</div>
+        <div class="cap-sub">クリックで指示ごとの内訳を開く</div>
+      </figcaption>
+      <div class="sessions" id="sessionList"></div>
+    </figure>
+  </div>
+
+  <figure class="card" id="sessionDetail" hidden>
+    <figcaption>
+      <div class="cap-title" id="detailTitle"></div>
+      <div class="cap-sub" id="detailSub"></div>
+      <button type="button" class="toggle" data-target="detailTable">表で見る</button>
+      <button type="button" class="toggle" id="detailClose">閉じる</button>
+    </figcaption>
+    <div class="bars" id="detailBars"></div>
+    <div class="tableview" id="detailTable" hidden></div>
+  </figure>
+</main>
+
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

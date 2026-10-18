@@ -1,0 +1,14 @@
+{
+  "name": "ai-agent-dashboard",
+  "version": "0.1.0",
+  "description": "Claude Code のトランスクリプト(~/.claude/projects/**/*.jsonl)から、どの指示でどれだけトークンを消費したかを可視化するローカルダッシュボード",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test \"test/**/*.test.mjs\""
+  }
+}

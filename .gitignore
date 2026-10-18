@@ -1,0 +1,6 @@
+# HyperHelix nested framework repo (session-bootstrap step 4)
+doc/HyperHelix/
+
+node_modules/
+.claude/tmp/
+.claude/settings.local.json

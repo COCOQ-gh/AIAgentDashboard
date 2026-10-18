@@ -1,0 +1,118 @@
+/* 色は役割名で定義し、ライト/ダークはここだけで切り替える(dataviz 参照パレット)。 */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --s-cache-read: #2a78d6;     /* slot 1 blue   */
+  --s-cache-create: #eb6834;   /* slot 2 orange */
+  --s-input: #1baf7a;          /* slot 3 aqua   */
+  --s-output: #eda100;         /* slot 4 yellow */
+  --s-single: #2a78d6;
+  --track: #cde2fb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --s-cache-read: #3987e5;
+    --s-cache-create: #d95926;
+    --s-input: #199e70;
+    --s-output: #c98500;
+    --s-single: #3987e5;
+    --track: #184f95;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --s-cache-read: #3987e5; --s-cache-create: #d95926; --s-input: #199e70; --s-output: #c98500;
+  --s-single: #3987e5; --track: #184f95;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 0 16px 48px;
+}
+.topbar { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; padding: 20px 0 8px; }
+h1 { font-size: 20px; margin: 0; font-weight: 600; }
+h1 .sub { font-size: 13px; color: var(--ink-2); font-weight: 400; margin-left: 10px; }
+.meta { color: var(--muted); font-size: 12px; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; padding: 8px 0 16px; border-bottom: 1px solid var(--grid); margin-bottom: 16px; }
+.filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--ink-2); gap: 4px; }
+select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+button { cursor: pointer; }
+button:hover { border-color: var(--axis); }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.tile .label { font-size: 12px; color: var(--ink-2); }
+.tile .value { font-size: 26px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
+.tile .note { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px 16px; margin: 0 0 16px; }
+figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 10px; }
+.cap-title { font-weight: 600; font-size: 15px; flex-basis: 100%; }
+.cap-sub { color: var(--ink-2); font-size: 12px; flex: 1 1 auto; }
+.toggle { font-size: 12px; padding: 3px 8px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 820px) { .two { grid-template-columns: 1fr; } }
+
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); }
+.legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+/* 横棒: 1 行 = ラベル列 + バー列 + 値列。バーは <=24px、先端 4px 丸、基線側は角。 */
+.bars { display: grid; grid-template-columns: minmax(140px, 32%) 1fr 72px; gap: 6px 10px; align-items: center; }
+.bars .lbl { font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bars .lbl small { color: var(--muted); margin-left: 6px; }
+.bars .lbl.clickable { cursor: pointer; }
+.bars .lbl.clickable:hover { text-decoration: underline; }
+.bars .track { position: relative; height: 18px; display: flex; gap: 2px; min-width: 0; }
+.bars .seg { height: 100%; min-width: 0; }
+.bars .seg:last-child { border-radius: 0 4px 4px 0; }
+.bars .seg:first-child { border-radius: 0; }
+.bars .seg:first-child:last-child { border-radius: 0 4px 4px 0; }
+.bars .val { font-size: 12px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+.bars.single .seg { background: var(--s-single); border-radius: 0 4px 4px 0; }
+.seg.cacheRead { background: var(--s-cache-read); }
+.seg.cacheCreation { background: var(--s-cache-create); }
+.seg.input { background: var(--s-input); }
+.seg.output { background: var(--s-output); }
+.bars .track:hover .seg { filter: brightness(1.08); }
+.empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+
+.tableview table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.tableview th, .tableview td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+.tableview th { color: var(--ink-2); font-weight: 600; }
+.tableview td.num, .tableview th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.sessions { max-height: 420px; overflow: auto; }
+.sess { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 7px 6px; border-bottom: 1px solid var(--grid); cursor: pointer; border-radius: 4px; }
+.sess:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.sess .t { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess .d { font-size: 11px; color: var(--muted); grid-column: 1; }
+.sess .n { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; grid-row: 1 / span 2; align-self: center; }
+
+.tooltip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); box-shadow: 0 4px 16px rgba(0,0,0,0.12); border-radius: 8px; padding: 8px 10px; font-size: 12px; max-width: 360px; }
+.tooltip .tt-title { font-weight: 600; margin-bottom: 4px; word-break: break-word; }
+.tooltip .row { display: flex; justify-content: space-between; gap: 16px; }
+.tooltip .row span:last-child { font-variant-numeric: tabular-nums; }
+.tooltip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
