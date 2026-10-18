@@ -3,19 +3,50 @@
 //   <project>/<sessionId>/subagents/agent-*.jsonl … サブエージェント(isSidechain)。
 //        先頭の user 行の promptId が親セッションの人間プロンプトを指す
 // ファイルごとに (size, mtimeMs) をキーにメモリキャッシュし、変化したものだけ再パースする。
+// 再パースは worker_threads(scan-worker.mjs)で CPU 数まで並列に行う(JSON.parse が支配的なため)。
 // 解決(resolveSessions)はキャッシュを変更せず、毎回新しいオブジェクトを組み立てる。
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { Worker } from 'node:worker_threads';
 import { parseTranscript, emptyUsage, addUsage, newPrompt, recomputeSession } from './parse.mjs';
 
 export function defaultProjectsDir() {
   return process.env.CLAUDE_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects');
 }
 
+/** 並列パースのワーカー数。AIAD_SCAN_WORKERS で上書き(0 = ワーカーを使わず同一スレッドで逐次)。既定は CPU 数。 */
+export function defaultWorkerCount() {
+  const env = process.env.AIAD_SCAN_WORKERS;
+  if (env !== undefined && env !== '') {
+    const n = Number(env);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  }
+  return Math.max(1, typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length);
+}
+
+/** 1 ファイルを読んでパースし、ファイル情報を付けたセッションを返す(主スレッド・ワーカー共通)。 */
+export async function readSession(entry) {
+  const st = await fs.stat(entry.filePath);
+  const text = await fs.readFile(entry.filePath, 'utf8');
+  const session = parseTranscript(text, { sessionId: entry.sessionId });
+  session.sessionId = entry.sessionId; // ファイル名を正とする(フォークはレコード内 sessionId が旧 ID のことがある)
+  session.projectKey = entry.projectKey;
+  session.parentSessionId = entry.parentSessionId;
+  session.fileSize = st.size;
+  session.fileMtime = st.mtimeMs;
+  return session;
+}
+
+function errorSession(entry, e) {
+  return { sessionId: entry.sessionId, projectKey: entry.projectKey, parentSessionId: entry.parentSessionId, error: String(e.message || e), prompts: [], usage: emptyUsage(), apiCalls: 0, models: {}, fileMtime: 0 };
+}
+
 export class TranscriptStore {
-  constructor(projectsDir = defaultProjectsDir()) {
+  /** @param {{workers?: number}} [opts] workers: 並列パースのワーカー数(0 = 逐次) */
+  constructor(projectsDir = defaultProjectsDir(), opts = {}) {
     this.projectsDir = projectsDir;
+    this.workers = opts.workers ?? defaultWorkerCount();
     this.cache = new Map(); // filePath -> { size, mtimeMs, session }
     this.lastScan = null;
   }
@@ -60,19 +91,60 @@ export class TranscriptStore {
     return out;
   }
 
+  /** キャッシュ命中ならその session、未命中なら読み直してキャッシュに入れる(逐次パス)。 */
   async loadSession(entry) {
     const st = await fs.stat(entry.filePath);
     const hit = this.cache.get(entry.filePath);
     if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.session;
-    const text = await fs.readFile(entry.filePath, 'utf8');
-    const session = parseTranscript(text, { sessionId: entry.parentSessionId ? entry.sessionId : entry.sessionId });
-    session.sessionId = entry.sessionId; // ファイル名を正とする(フォークはレコード内 sessionId が旧 ID のことがある)
-    session.projectKey = entry.projectKey;
-    session.parentSessionId = entry.parentSessionId;
-    session.fileSize = st.size;
-    session.fileMtime = st.mtimeMs;
-    this.cache.set(entry.filePath, { size: st.size, mtimeMs: st.mtimeMs, session });
+    const session = await readSession(entry);
+    this.cache.set(entry.filePath, { size: session.fileSize, mtimeMs: session.fileMtime, session });
     return session;
+  }
+
+  /**
+   * 変化したファイル群をワーカーで並列にパースする。戻り値は entries と同じ順の
+   * { session } | { error } 配列。ワーカー自体が落ちたら reject する(呼び出し側が逐次へ退避)。
+   */
+  parseWithWorkers(entries, workerCount) {
+    // 大きいファイルから配ると、末尾で 1 本の巨大ファイルを待つ時間が短くなる
+    const queue = entries.map((entry, seq) => ({ entry, seq })).sort((a, b) => (b.entry.size || 0) - (a.entry.size || 0));
+    const results = new Array(entries.length);
+    return new Promise((resolve, reject) => {
+      const workers = [];
+      let next = 0;
+      let done = 0;
+      let failed = false;
+      const stopAll = () => workers.forEach((w) => w.terminate());
+      const feed = (w) => {
+        if (next >= queue.length) {
+          w.terminate();
+          return;
+        }
+        const { entry, seq } = queue[next++];
+        w.postMessage({ seq, entry: { projectKey: entry.projectKey, filePath: entry.filePath, sessionId: entry.sessionId, parentSessionId: entry.parentSessionId } });
+      };
+      for (let k = 0; k < workerCount; k++) {
+        const w = new Worker(new URL('./scan-worker.mjs', import.meta.url));
+        w.on('message', (m) => {
+          results[m.seq] = m;
+          done++;
+          if (done === queue.length) {
+            stopAll();
+            resolve(results);
+          } else {
+            feed(w);
+          }
+        });
+        w.on('error', (err) => {
+          if (failed) return;
+          failed = true;
+          stopAll();
+          reject(err);
+        });
+        workers.push(w);
+        feed(w);
+      }
+    });
   }
 
   /** 全ファイルを(キャッシュを使って)読み、解決済みセッション配列を返す。 */
@@ -81,16 +153,53 @@ export class TranscriptStore {
     const files = await this.listFiles();
     const live = new Set(files.map((f) => f.filePath));
     for (const k of this.cache.keys()) if (!live.has(k)) this.cache.delete(k);
-    const parsed = [];
-    for (const f of files) {
+
+    // 1. stat でキャッシュ命中を判定し、変化分だけを集める
+    const parsed = new Array(files.length);
+    const stale = [];
+    await Promise.all(
+      files.map(async (f, i) => {
+        try {
+          const st = await fs.stat(f.filePath);
+          const hit = this.cache.get(f.filePath);
+          if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) parsed[i] = hit.session;
+          else stale.push({ index: i, entry: { ...f, size: st.size } });
+        } catch (e) {
+          parsed[i] = errorSession(f, e);
+        }
+      })
+    );
+
+    // 2. 変化分をパース(複数あればワーカー並列、1 件以下または workers=0 なら逐次)
+    const workerCount = Math.min(this.workers, stale.length);
+    let results = null;
+    if (workerCount > 1) {
       try {
-        parsed.push(await this.loadSession(f));
+        results = await this.parseWithWorkers(stale.map((s) => s.entry), workerCount);
       } catch (e) {
-        parsed.push({ sessionId: f.sessionId, projectKey: f.projectKey, parentSessionId: f.parentSessionId, error: String(e.message || e), prompts: [], usage: emptyUsage(), apiCalls: 0, models: {}, fileMtime: 0 });
+        console.error('scan: worker pool failed, falling back to sequential parse:', e && e.message ? e.message : e);
       }
     }
+    for (let k = 0; k < stale.length; k++) {
+      const { index, entry } = stale[k];
+      let r = results && results[k];
+      if (!r) {
+        try {
+          r = { session: await readSession(entry) };
+        } catch (e) {
+          r = { error: String(e.message || e) };
+        }
+      }
+      if (r.session) {
+        this.cache.set(entry.filePath, { size: r.session.fileSize, mtimeMs: r.session.fileMtime, session: r.session });
+        parsed[index] = r.session;
+      } else {
+        parsed[index] = errorSession(entry, { message: r.error });
+      }
+    }
+
     const sessions = resolveSessions(parsed);
-    this.lastScan = { at: new Date().toISOString(), ms: Date.now() - t0, files: files.length, sessions: sessions.length, duplicatesDropped: sessions.reduce((n, s) => n + s.duplicatePrompts, 0) };
+    this.lastScan = { at: new Date().toISOString(), ms: Date.now() - t0, files: files.length, sessions: sessions.length, duplicatesDropped: sessions.reduce((n, s) => n + s.duplicatePrompts, 0), parsed: stale.length, workers: workerCount };
     return sessions;
   }
 }

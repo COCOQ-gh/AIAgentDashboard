@@ -59,3 +59,44 @@ test('resolveSessions はキャッシュ側のオブジェクトを変更しな�
   assert.equal(b.prompts[0].calls.length, 1);
   assert.equal(b.usage.total, 10);
 });
+
+test('TranscriptStore.scan はワーカー並列でも逐次と同じ結果を返し、変化したファイルだけ再パースする', async () => {
+  const { promises: fs } = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { TranscriptStore } = await import('../src/scan.mjs');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aiad-scan-'));
+  try {
+    const proj = path.join(dir, 'proj');
+    await fs.mkdir(path.join(proj, 'S1', 'subagents'), { recursive: true });
+    await fs.writeFile(path.join(proj, 'S1.jsonl'), [human('親の指示', 'P1', '2026-10-18T00:00:00Z'), assistant('m1', usage(1, 1, 1, 1), '2026-10-18T00:00:01Z')].join('\n'));
+    await fs.writeFile(
+      path.join(proj, 'S1', 'subagents', 'agent-ag1.jsonl'),
+      [J({ type: 'user', isSidechain: true, promptId: 'P1', agentId: 'ag1', uuid: 'wo-1', timestamp: '2026-10-18T00:00:02Z', message: { role: 'user', content: 'WO' } }), assistant('sm1', usage(0, 0, 500, 20), '2026-10-18T00:00:03Z', { isSidechain: true })].join('\n')
+    );
+    await fs.writeFile(path.join(proj, 'S2.jsonl'), [human('別の指示', 'P2', '2026-10-18T01:00:00Z'), assistant('m2', usage(10, 0, 0, 5), '2026-10-18T01:00:01Z')].join('\n'));
+    await fs.writeFile(path.join(proj, 'S3.jsonl'), '{壊れた行\n' + human('三つ目', 'P3', '2026-10-18T02:00:00Z'));
+
+    const seq = new TranscriptStore(dir, { workers: 0 });
+    const par = new TranscriptStore(dir, { workers: 3 });
+    const a = await seq.scan();
+    const b = await par.scan();
+    assert.equal(par.lastScan.workers, 3);
+    assert.equal(par.lastScan.parsed, 4);
+    assert.deepEqual(b, a);
+    assert.equal(a.length, 3);
+    assert.equal(a.find((s) => s.sessionId === 'S1').usage.total, 4 + 520);
+    assert.equal(a.find((s) => s.sessionId === 'S3').badLines, 1);
+
+    // 2 回目は全件キャッシュ命中 → パース 0 件。1 ファイルだけ書き換えるとそれだけ再パース(逐次パス)
+    await par.scan();
+    assert.equal(par.lastScan.parsed, 0);
+    await fs.writeFile(path.join(proj, 'S2.jsonl'), [human('別の指示', 'P2', '2026-10-18T01:00:00Z'), assistant('m2', usage(10, 0, 0, 5), '2026-10-18T01:00:01Z'), assistant('m3', usage(7, 0, 0, 0), '2026-10-18T01:00:02Z')].join('\n'));
+    const c = await par.scan();
+    assert.equal(par.lastScan.parsed, 1);
+    assert.equal(par.lastScan.workers, 1);
+    assert.equal(c.find((s) => s.sessionId === 'S2').usage.total, 22);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
