@@ -43,10 +43,14 @@ function errorSession(entry, e) {
 }
 
 export class TranscriptStore {
-  /** @param {{workers?: number}} [opts] workers: 並列パースのワーカー数(0 = 逐次) */
+  /**
+   * @param {{workers?: number, projectKey?: string|null}} [opts]
+   *   workers: 並列パースのワーカー数(0 = 逐次) / projectKey: 指定するとそのプロジェクトディレクトリだけを走査する
+   */
   constructor(projectsDir = defaultProjectsDir(), opts = {}) {
     this.projectsDir = projectsDir;
     this.workers = opts.workers ?? defaultWorkerCount();
+    this.projectKey = opts.projectKey || null;
     this.cache = new Map(); // filePath -> { size, mtimeMs, session }
     this.lastScan = null;
   }
@@ -62,6 +66,7 @@ export class TranscriptStore {
     }
     for (const d of dirs) {
       if (!d.isDirectory()) continue;
+      if (this.projectKey && d.name !== this.projectKey) continue;
       const projDir = path.join(this.projectsDir, d.name);
       let entries;
       try {

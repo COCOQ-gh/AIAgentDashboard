@@ -97,7 +97,7 @@ export function newPrompt(rec, index, kind) {
     endTimestamp: rec.timestamp || null,
     text: d.text.slice(0, 400),
     rawLength: raw.length,
-    calls: [], // {id, usage, model, toolUses, sidechain, timestamp}
+    calls: [], // {id, usage, model, toolUses, tools: [name], sidechain, timestamp}
     usage: emptyUsage(),
     apiCalls: 0,
     toolUses: 0,
@@ -200,10 +200,12 @@ export function parseTranscript(text, opts = {}) {
         const m = rec.message;
         if (!m || !m.usage) break;
         const id = m.id || rec.requestId || rec.uuid;
-        const toolUses = Array.isArray(m.content) ? m.content.filter((b) => b && b.type === 'tool_use').length : 0;
+        const toolNames = Array.isArray(m.content) ? m.content.filter((b) => b && b.type === 'tool_use').map((b) => (typeof b.name === 'string' ? b.name : '(unknown)')) : [];
+        const toolUses = toolNames.length;
         const prev = id && seenMessageIds.get(id);
         if (prev) {
           prev.toolUses += toolUses; // 同一応答の分割行。usage は数え済み
+          prev.tools.push(...toolNames);
           break;
         }
         if (!current) {
@@ -211,7 +213,7 @@ export function parseTranscript(text, opts = {}) {
           current = newPrompt({ message: { content: '(帰属先プロンプトなし)' }, timestamp: rec.timestamp, uuid: rec.uuid }, session.prompts.length, 'orphan');
           session.prompts.push(current);
         }
-        const call = { id: id || null, usage: usageFromMessage(m.usage), model: m.model || null, toolUses, sidechain: !!rec.isSidechain, timestamp: rec.timestamp || null };
+        const call = { id: id || null, usage: usageFromMessage(m.usage), model: m.model || null, toolUses, tools: toolNames, sidechain: !!rec.isSidechain, timestamp: rec.timestamp || null };
         if (id) seenMessageIds.set(id, call);
         current.calls.push(call);
         break;

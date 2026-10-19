@@ -49,7 +49,31 @@ npm start
 | `GET /api/prompts?project=&since=&sort=total|output|recent&limit=` | 指示一覧 |
 | `GET /api/sessions?project=` | セッション一覧 |
 | `GET /api/session?id=` | 1 セッションの指示別内訳 |
+| `GET /api/report?session=&top=` | AI エージェント向けレポート(下記 CLI と同じ JSON) |
 | `POST /api/rescan` | 再走査 |
+
+## AI エージェントから使う(CLI / スキル)
+
+エージェント自身が「いまのセッションでどの指示にいくらトークンを使ったか」「コンテキストがどれだけ埋まったか」
+「どのツールが文脈を増やしたか」を読み、作業の仕方を調整するための出力。サーバ不要で、走査は cwd に対応する
+`~/.claude/projects/<key>/` だけ(1 秒以内)。
+
+```bash
+npm run usage                                  # $CLAUDE_CODE_SESSION_ID のセッション(無ければ cwd の最新)を Markdown で
+npm run usage -- --list                        # cwd のプロジェクトのセッション一覧
+npm run usage -- --session <id> --format json  # 機械可読
+```
+
+Claude Code では `/token-usage` スキル(`.claude/commands/token-usage.md`)が CLI を実行し、提案に沿って進め方を
+変える(コンテキスト 70% 超で /compact・探索はサブエージェントへ委任・大きなファイルは範囲指定で読む、など)。
+
+レポートの内容: 合計と内訳 / 現在のコンテキスト量(推定)/ 提案 / 消費の多い指示 / ツール別の文脈追加(概算)/ 指示の時系列。
+
+- **コンテキスト量** = 最後の API 呼出の `input + cache_read + cache_creation`(その呼出でモデルに渡した全トークン)。
+  窓の大きさはモデル名から推定する(`AIAD_CONTEXT_WINDOW` か `--window` で上書き)。
+- **ツール別の文脈追加** = 「次の呼出で新たに入力されたトークン(`input + cache_creation`)」を、直前の呼出が使った
+  ツールへ等分した概算。ツール結果(ファイル読み込み・コマンド出力)が文脈をどれだけ増やしたかの目安。
+- **サブエージェント**(sidechain)の消費は合計に含むが、親のコンテキスト量には含めない。
 
 ## 開発プロセス
 

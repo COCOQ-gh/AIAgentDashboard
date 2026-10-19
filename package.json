@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/server.mjs",
+    "usage": "node src/cli.mjs",
     "test": "node --test \"test/**/*.test.mjs\""
   }
 }

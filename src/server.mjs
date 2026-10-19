@@ -3,6 +3,7 @@
 //   GET /api/prompts?project=&limit=&sort=  指示一覧(トークン降順など)
 //   GET /api/sessions?project=              セッション一覧
 //   GET /api/session?id=                    1 セッションの指示別内訳
+//   GET /api/report?session=&top=           AI エージェント向けレポート(コンテキスト推定・ツール別追加・提案)
 //   POST /api/rescan                        キャッシュを使って再走査
 import http from 'node:http';
 import path from 'node:path';
@@ -10,6 +11,7 @@ import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TranscriptStore, summarizeProjects, sessionSummary, flattenPrompts, promptView } from './scan.mjs';
 import { emptyUsage, addUsage } from './parse.mjs';
+import { buildReport } from './report.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -72,6 +74,13 @@ async function api(url, req, res) {
     const s = sessions.find((x) => x.sessionId === id);
     if (!s) return json(res, 404, { error: 'session not found' });
     return json(res, 200, { ...sessionSummary(s), promptList: s.prompts.map(promptView) });
+  }
+  if (url.pathname === '/api/report') {
+    // AI エージェント向け: 1 セッションの消費・コンテキスト推定・ツール別の文脈追加・提案(src/report.mjs)
+    const id = url.searchParams.get('session');
+    const s = sessions.find((x) => x.sessionId === id);
+    if (!s) return json(res, 404, { error: 'session not found' });
+    return json(res, 200, buildReport(s, { top: Math.min(Number(url.searchParams.get('top') || 5), 100) }));
   }
   return json(res, 404, { error: 'not found' });
 }
