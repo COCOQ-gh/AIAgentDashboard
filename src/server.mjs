@@ -12,6 +12,18 @@ import { fileURLToPath } from 'node:url';
 import { TranscriptStore, summarizeProjects, sessionSummary, flattenPrompts, promptView } from './scan.mjs';
 import { emptyUsage, addUsage } from './parse.mjs';
 import { buildReport } from './report.mjs';
+import { analyzeSession, emptyBreakdown, addBreakdown, causeRows, componentRows } from './attribution.mjs';
+
+// セッションごとのキャッシュ内訳(since 無し)はセッションオブジェクトに紐づけてメモ化する(再走査で作り直される)
+const analysisCache = new WeakMap();
+function analysisFor(s) {
+  let a = analysisCache.get(s);
+  if (!a) analysisCache.set(s, (a = analyzeSession(s)));
+  return a;
+}
+function breakdownView(b) {
+  return { calls: b.calls, cacheCreation: b.cacheCreation, cacheRead: b.cacheRead, modelSwitches: b.modelSwitches, causes: causeRows(b), components: componentRows(b) };
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -59,7 +71,9 @@ async function api(url, req, res) {
     const limit = Math.min(Number(url.searchParams.get('limit') || 50), 1000);
     const sort = url.searchParams.get('sort') || 'total';
     const since = url.searchParams.get('since') || '';
-    let list = flattenPrompts(filterByProject(sessions, project));
+    const scoped = filterByProject(sessions, project);
+    const extrasBySession = new Map(scoped.map((s) => [s.sessionId, analysisFor(s).promptExtras]));
+    let list = flattenPrompts(scoped).map((p) => ({ ...p, ...(extrasBySession.get(p.sessionId)?.[p.index] || { modelSwitches: 0, switchTokens: 0 }) }));
     if (since) list = list.filter((p) => p.timestamp && p.timestamp >= since);
     const key = { total: (p) => p.usage.total, output: (p) => p.usage.output, recent: (p) => p.timestamp || '' }[sort] || ((p) => p.usage.total);
     list.sort((a, b) => (key(b) > key(a) ? 1 : key(b) < key(a) ? -1 : 0));
@@ -73,7 +87,16 @@ async function api(url, req, res) {
     const id = url.searchParams.get('id');
     const s = sessions.find((x) => x.sessionId === id);
     if (!s) return json(res, 404, { error: 'session not found' });
-    return json(res, 200, { ...sessionSummary(s), promptList: s.prompts.map(promptView) });
+    const a = analysisFor(s);
+    const promptList = s.prompts.map((p) => ({ ...promptView(p), ...(a.promptExtras[p.index] || { modelSwitches: 0, switchTokens: 0 }) }));
+    return json(res, 200, { ...sessionSummary(s), promptList, breakdown: { ...breakdownView(a), switches: a.switches } });
+  }
+  if (url.pathname === '/api/breakdown') {
+    // キャッシュ作成の原因 / キャッシュ読取の構成(project・since で絞る)
+    const since = url.searchParams.get('since') || '';
+    const total = emptyBreakdown();
+    for (const s of filterByProject(sessions, project)) addBreakdown(total, since ? analyzeSession(s, { since }) : analysisFor(s));
+    return json(res, 200, breakdownView(total));
   }
   if (url.pathname === '/api/report') {
     // AI エージェント向け: 1 セッションの消費・コンテキスト推定・ツール別の文脈追加・提案(src/report.mjs)

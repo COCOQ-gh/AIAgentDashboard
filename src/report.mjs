@@ -8,6 +8,8 @@
 //     直前の呼出が使ったツールへ等分した概算。ツールを使わない応答は '(応答のみ)'、各指示の
 //     最初の呼出(指示本文 + 注入されたシステム文脈)は '(指示+システム)' に計上する
 
+import { analyzeSession, causeRows, componentRows } from './attribution.mjs';
+
 export function projectKeyFromCwd(cwd) {
   return String(cwd).replace(/[^A-Za-z0-9]/g, '-');
 }
@@ -119,8 +121,12 @@ export function buildReport(session, opts = {}) {
     prompts: rows,
     top: [...rows].sort((a, b) => b.usage.total - a.usage.total).slice(0, top),
     tools: toolCosts(session),
+    cache: null,
     hints: [],
   };
+  // キャッシュ作成の原因 / キャッシュ読取の構成(src/attribution.mjs)
+  const b = analyzeSession(session);
+  report.cache = { cacheCreation: b.cacheCreation, cacheRead: b.cacheRead, modelSwitches: b.modelSwitches, switches: b.switches, causes: causeRows(b), components: componentRows(b) };
   report.hints = hints(report);
   return report;
 }
@@ -147,6 +153,21 @@ export function hints(report) {
   }
   if (session.sidechainTokens > 0) {
     h.push(`サブエージェント側の消費 ${fmt(session.sidechainTokens)} トークンは親のコンテキストを増やしていない(委任は文脈を守る)`);
+  }
+  const c = report.cache;
+  if (c && c.cacheCreation > 0) {
+    const sw = c.modelSwitches;
+    if (sw.count > 0 && sw.tokens / c.cacheCreation >= 0.1) {
+      h.push(`モデル切替 ${sw.count} 回でキャッシュを作り直した分が ${fmt(sw.tokens)} トークン(キャッシュ作成の ${Math.round((sw.tokens / c.cacheCreation) * 100)}%)。キャッシュはモデル別なので、切替は文脈が小さいうち(セッション冒頭)か、別セッションに分けて行う`);
+    }
+    const idle = c.causes.find((r) => r.key === 'idleLong');
+    if (idle && idle.tokens / c.cacheCreation >= 0.3) {
+      h.push(`1 時間以上空いた後の再開 ${idle.calls} 回で ${fmt(idle.tokens)} トークンを作り直している(キャッシュ作成の ${Math.round(idle.pct * 100)}%)。長く離れるなら区切りをつけて /compact するか、再開時は文脈の小さい新セッションで始める`);
+    }
+    const top = c.components[0];
+    if (top && c.cacheRead > 0 && top.pct >= 0.3 && top.key !== 'baseline') {
+      h.push(`繰り返し読まれている文脈の最大成分は「${top.label}」(キャッシュ読取の ${Math.round(top.pct * 100)}%)。${top.key === 'assistantOutput' ? '長い説明や思考の出力を抑え、要点だけ返す' : top.key.startsWith('tool:') ? 'このツールの結果を絞る(範囲指定・head/grep)か、不要になったら /compact で落とす' : '指示に貼る内容を絞る'}`);
+    }
   }
   if (h.length === 0) h.push('目立った偏りなし。このまま継続してよい');
   return h;
@@ -190,6 +211,23 @@ export function renderMarkdown(r) {
   out.push('|---|---|---|---|');
   for (const t of r.tools.slice(0, 12)) out.push(`| ${cell(t.tool)} | ${t.uses} | ${fmt(t.addedTokens)} | ${added ? Math.round((t.addedTokens / added) * 100) : 0}% |`);
   out.push('');
+  if (r.cache) {
+    const c = r.cache;
+    out.push(`## キャッシュ作成の原因(${fmt(c.cacheCreation)} トークン)`);
+    out.push('| 原因 | 回数 | トークン | 比率 |');
+    out.push('|---|---|---|---|');
+    for (const x of c.causes) if (x.calls) out.push(`| ${x.label} | ${x.calls} | ${fmt(x.tokens)} | ${Math.round(x.pct * 100)}% |`);
+    if (c.switches.length) {
+      out.push('');
+      out.push('モデル切替: ' + c.switches.map((s) => `${hhmm(s.timestamp)} ${s.from} → ${s.to}(${fmt(s.cacheCreation)})`).join(' / '));
+    }
+    out.push('');
+    out.push(`## キャッシュ読取の構成(${fmt(c.cacheRead)} トークン・概算)`);
+    out.push('| 文脈の由来 | トークン | 比率 |');
+    out.push('|---|---|---|');
+    for (const x of c.components.slice(0, 12)) out.push(`| ${cell(x.label)} | ${fmt(x.tokens)} | ${Math.round(x.pct * 100)}% |`);
+    out.push('');
+  }
   out.push('## 指示の時系列');
   out.push('| # | 時刻 | 種別 | 指示 | API | ツール | 合計 | 文脈終端 |');
   out.push('|---|---|---|---|---|---|---|---|');
@@ -197,7 +235,7 @@ export function renderMarkdown(r) {
   if (tail.length < r.prompts.length) out.push(`| … | | | (先頭 ${r.prompts.length - tail.length} 件省略) | | | | |`);
   for (const p of tail) out.push(`| ${p.index} | ${hhmm(p.timestamp)} | ${p.kind} | ${cell(p.text.slice(0, 50))} | ${p.apiCalls} | ${p.toolUses} | ${fmt(p.usage.total)} | ${fmt(p.contextEnd)} |`);
   out.push('');
-  out.push('> 推定の根拠: コンテキスト = 最後の API 呼出の input + cache_read + cache_creation。窓の大きさはモデル名からの推定(AIAD_CONTEXT_WINDOW で上書き)。ツール別の追加は「次の呼出で新たに入力されたトークン」を直前の呼出のツールへ按分した概算。');
+  out.push('> 推定の根拠: コンテキスト = 最後の API 呼出の input + cache_read + cache_creation。窓の大きさはモデル名からの推定(AIAD_CONTEXT_WINDOW で上書き)。ツール別の追加は「次の呼出で新たに入力されたトークン」を直前の呼出のツールへ按分した概算。キャッシュ作成の原因は直前の呼出との関係(model の変化 / 経過時間 60 分・5 分 / 文脈の 30% 超の縮小)で分類。キャッシュ読取の構成は「文脈に積まれた内容の由来」を台帳で追跡し各呼出の読取量を構成比で按分した概算(過去の thinking は落ちることがあるため出力は上限側)。');
   return out.join('\n');
 }
 

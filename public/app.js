@@ -91,6 +91,27 @@
     val.textContent = fmt(u.total);
     return [lbl, track, val];
   }
+  // 単一系列の横棒(順序付きカテゴリ: 原因・構成)
+  function singleRow(label, sub, tokens, max, tipHTML) {
+    const lbl = document.createElement('div');
+    lbl.className = 'lbl';
+    lbl.innerHTML = esc(label) + (sub ? `<small>${esc(sub)}</small>` : '');
+    const track = document.createElement('div');
+    track.className = 'track';
+    track.style.width = (max > 0 ? Math.max((tokens / max) * 100, tokens > 0 ? 0.6 : 0) : 0) + '%';
+    const seg = document.createElement('div');
+    seg.className = 'seg';
+    track.appendChild(seg);
+    if (tipHTML) {
+      track.addEventListener('mouseenter', (e) => showTip(e, tipHTML));
+      track.addEventListener('mousemove', moveTip);
+      track.addEventListener('mouseleave', hideTip);
+    }
+    const val = document.createElement('div');
+    val.className = 'val';
+    val.textContent = fmt(tokens);
+    return [lbl, track, val];
+  }
   function renderBars(container, rows) {
     container.innerHTML = '';
     if (!rows.length) { container.innerHTML = '<div class="empty">データがありません</div>'; return; }
@@ -140,8 +161,9 @@
     const q = new URLSearchParams({ project: state.project, sort: state.sort, limit, since: sinceISO() });
     const r = await getJSON('/api/prompts?' + q);
     const max = Math.max(0, ...r.prompts.map((p) => p.usage.total));
-    renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)} · API ${p.apiCalls} 回`, p.usage, max, p.text,
-      `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div><div class="row"><span>セッション</span><span>${esc(p.sessionTitle || '')}</span></div>`,
+    const swText = (p) => (p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回(${fmt(p.switchTokens)} 再作成)` : '');
+    renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)} · API ${p.apiCalls} 回${swText(p)}`, p.usage, max, p.text,
+      `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div><div class="row"><span>モデル切替</span><span>${full(p.modelSwitches || 0)} 回</span></div><div class="row"><span>セッション</span><span>${esc(p.sessionTitle || '')}</span></div>`,
       () => openSession(p.sessionId))));
     $('promptsTable').innerHTML = usageTable([{ label: '日時' }, { label: '指示' }, { label: 'プロジェクト' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
       r.prompts.map((p) => [when(p.timestamp), p.text, projName(p.projectKey, p.cwd), full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
@@ -149,6 +171,21 @@
     more.hidden = r.count <= r.prompts.length;
     more.textContent = `もっと見る(${full(r.prompts.length)} / ${full(r.count)} 件)`;
     return r;
+  }
+  async function loadBreakdown() {
+    const q = new URLSearchParams({ project: state.project, since: sinceISO() });
+    const b = await getJSON('/api/breakdown?' + q);
+    const pct = (x) => Math.round(x * 100) + '%';
+    const causes = b.causes.filter((r) => r.calls > 0);
+    const maxC = Math.max(0, ...causes.map((r) => r.tokens));
+    renderBars($('causeBars'), causes.map((r) => singleRow(r.label, `${pct(r.pct)} · ${full(r.calls)} 回`, r.tokens, maxC, `<div class="tt-title">${esc(r.label)}</div><div class="row"><span>トークン</span><span>${full(r.tokens)}</span></div><div class="row"><span>API 応答</span><span>${full(r.calls)}</span></div>`)));
+    $('causeSub').textContent = `キャッシュ作成 ${fmt(b.cacheCreation)} トークンの内訳。モデル切替 ${full(b.modelSwitches.count)} 回で ${fmt(b.modelSwitches.tokens)} を作り直し。`;
+    $('causeTable').innerHTML = usageTable([{ label: '原因' }, { label: '回数', num: true }, { label: 'トークン', num: true, total: true }, { label: '比率', num: true }], causes.map((r) => [r.label, full(r.calls), full(r.tokens), pct(r.pct)]));
+    const comps = b.components;
+    const maxK = Math.max(0, ...comps.map((r) => r.tokens));
+    renderBars($('compBars'), comps.map((r) => singleRow(r.label, pct(r.pct), r.tokens, maxK, `<div class="tt-title">${esc(r.label)}</div><div class="row"><span>トークン</span><span>${full(r.tokens)}</span></div>`)));
+    $('compSub').textContent = `キャッシュ読取 ${fmt(b.cacheRead)} トークンを「文脈に積まれた内容の由来」で按分した概算(出力は上限側)。`;
+    $('compTable').innerHTML = usageTable([{ label: '文脈の由来' }, { label: 'トークン', num: true, total: true }, { label: '比率', num: true }], comps.map((r) => [r.label, full(r.tokens), pct(r.pct)]));
   }
   async function loadSessions() {
     const r = await getJSON('/api/sessions?' + new URLSearchParams({ project: state.project }));
@@ -165,9 +202,10 @@
   async function openSession(id) {
     const s = await getJSON('/api/session?' + new URLSearchParams({ id }));
     $('detailTitle').textContent = `セッション: ${s.title}`;
-    $('detailSub').textContent = `${when(s.startedAt)} 〜 ${when(s.endedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · 合計 ${full(s.usage.total)} トークン · ${Object.keys(s.models).join(', ')}`;
+    const sw = s.breakdown ? s.breakdown.modelSwitches : { count: 0, tokens: 0 };
+    $('detailSub').textContent = `${when(s.startedAt)} 〜 ${when(s.endedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · 合計 ${full(s.usage.total)} トークン · ${Object.keys(s.models).join(', ')}${sw.count ? ` · モデル切替 ${sw.count} 回(${fmt(sw.tokens)} 再作成)` : ''}`;
     const max = Math.max(0, ...s.promptList.map((p) => p.usage.total));
-    renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, `${when(p.timestamp)} · API ${p.apiCalls} 回 · ツール ${p.toolUses} 回`, p.usage, max, p.text,
+    renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, `${when(p.timestamp)} · API ${p.apiCalls} 回 · ツール ${p.toolUses} 回${p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回` : ''}`, p.usage, max, p.text,
       `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div>`)));
     $('detailTable').innerHTML = usageTable([{ label: '#', num: true }, { label: '日時' }, { label: '指示' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
       s.promptList.map((p) => [p.index + 1, when(p.timestamp), p.text, full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
@@ -185,7 +223,7 @@
     if (!keepExtra) state.extra = 0;
     document.body.style.opacity = '0.85';
     try {
-      const [, r] = await Promise.all([loadSessions(), loadPrompts()]);
+      const [, r] = await Promise.all([loadSessions(), loadPrompts(), loadBreakdown()]);
       const o = state.overview;
       const proj = state.project ? o.projects.find((x) => x.key === state.project) : null;
       const totals = proj ? { sessions: proj.sessions, prompts: proj.prompts, apiCalls: proj.apiCalls, usage: proj.usage } : o.totals;

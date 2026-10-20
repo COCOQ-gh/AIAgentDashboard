@@ -70,6 +70,28 @@
   </figure>
 
   <div class="two">
+    <figure class="card" id="causeCard">
+      <figcaption>
+        <div class="cap-title">キャッシュ作成の原因</div>
+        <div class="cap-sub" id="causeSub">直前の API 応答との関係で分類。モデル切替・長いアイドル・圧縮は「同じ文脈の作り直し」。</div>
+        <button type="button" class="toggle" data-target="causeTable">表で見る</button>
+      </figcaption>
+      <div class="bars single" id="causeBars"></div>
+      <div class="tableview" id="causeTable" hidden></div>
+    </figure>
+
+    <figure class="card" id="compCard">
+      <figcaption>
+        <div class="cap-title">キャッシュ読取の構成(概算)</div>
+        <div class="cap-sub" id="compSub">毎回再送されている文脈が「何でできているか」。文脈に積まれた内容の由来で按分。</div>
+        <button type="button" class="toggle" data-target="compTable">表で見る</button>
+      </figcaption>
+      <div class="bars single" id="compBars"></div>
+      <div class="tableview" id="compTable" hidden></div>
+    </figure>
+  </div>
+
+  <div class="two">
     <figure class="card" id="projectsCard">
       <figcaption>
         <div class="cap-title">プロジェクト別 合計トークン</div>
