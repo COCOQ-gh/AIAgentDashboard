@@ -1,4 +1,5 @@
-/* 色は役割名で定義し、ライト/ダークはここだけで切り替える(dataviz 参照パレット)。 */
+/* 色は役割名で定義し、ライト/ダークはここだけで切り替える(dataviz 参照パレット)。
+   文字サイズ・棒の高さは密度トークン(--fs-*, --bar-h)で持ち、html[data-density] で 3 段階に切り替える。 */
 :root {
   color-scheme: light;
   --page: #f9f9f7;
@@ -15,6 +16,27 @@
   --s-output: #eda100;         /* slot 4 yellow */
   --s-single: #2a78d6;
   --track: #cde2fb;
+
+  /* 密度: 標準 */
+  --fs-base: 16px;    /* 本文・フォーム */
+  --fs-label: 15px;   /* 棒のラベル・セッション名 */
+  --fs-sub: 14px;     /* 補助説明・凡例・表 */
+  --fs-small: 13px;   /* 日時・プロジェクト名などのメタ */
+  --fs-value: 15px;   /* 棒の値 */
+  --fs-title: 18px;   /* カード見出し */
+  --fs-hero: 44px;    /* ヒーロー数値 */
+  --fs-tile: 28px;    /* サブタイル数値 */
+  --bar-h: 22px;
+  --row-gap: 10px;
+  --val-w: 84px;
+}
+html[data-density="compact"] {
+  --fs-base: 14px; --fs-label: 13px; --fs-sub: 12.5px; --fs-small: 12px; --fs-value: 13px;
+  --fs-title: 16px; --fs-hero: 36px; --fs-tile: 24px; --bar-h: 18px; --row-gap: 6px; --val-w: 72px;
+}
+html[data-density="large"] {
+  --fs-base: 18px; --fs-label: 17px; --fs-sub: 16px; --fs-small: 15px; --fs-value: 17px;
+  --fs-title: 20px; --fs-hero: 52px; --fs-tile: 32px; --bar-h: 24px; --row-gap: 12px; --val-w: 96px;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
@@ -48,71 +70,93 @@ html, body { margin: 0; }
 body {
   background: var(--page);
   color: var(--ink);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: var(--fs-base)/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   padding: 0 16px 48px;
 }
 .topbar { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; padding: 20px 0 8px; }
-h1 { font-size: 20px; margin: 0; font-weight: 600; }
-h1 .sub { font-size: 13px; color: var(--ink-2); font-weight: 400; margin-left: 10px; }
-.meta { color: var(--muted); font-size: 12px; }
+h1 { font-size: calc(var(--fs-title) + 6px); margin: 0; font-weight: 600; }
+h1 .sub { font-size: var(--fs-sub); color: var(--ink-2); font-weight: 400; margin-left: 10px; }
+.meta { color: var(--ink-2); font-size: var(--fs-small); }
 
+/* フィルタ行: すべてのグラフに効く唯一のフィルタ */
 .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; padding: 8px 0 16px; border-bottom: 1px solid var(--grid); margin-bottom: 16px; }
-.filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--ink-2); gap: 4px; }
-select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+.filters label { display: flex; flex-direction: column; font-size: var(--fs-small); color: var(--ink-2); gap: 4px; }
+select, button { font: inherit; font-size: var(--fs-sub); color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
 button { cursor: pointer; }
 button:hover { border-color: var(--axis); }
+.density { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-small); color: var(--ink-2); margin-left: auto; }
+.density .group { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.density .group button { border: 0; border-radius: 0; padding: 6px 12px; }
+.density .group button + button { border-left: 1px solid var(--border); }
+.density .group button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
 
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
-.tile .label { font-size: 12px; color: var(--ink-2); }
-.tile .value { font-size: 26px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
-.tile .note { font-size: 11px; color: var(--muted); margin-top: 2px; }
+/* ヒーロー数値 + サブタイル(数値の階層をつける) */
+.hero { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 12px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 20px; }
+.hero .label { font-size: var(--fs-sub); color: var(--ink-2); flex-basis: 100%; }
+.hero .value { font-size: var(--fs-hero); font-weight: 600; line-height: 1.1; }
+.hero .note { font-size: var(--fs-sub); color: var(--ink-2); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+.tile .label { font-size: var(--fs-small); color: var(--ink-2); }
+.tile .value { font-size: var(--fs-tile); font-weight: 600; line-height: 1.2; margin-top: 2px; }
+.tile .note { font-size: var(--fs-small); color: var(--ink-2); margin-top: 2px; }
 
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px 16px; margin: 0 0 16px; }
-figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 10px; }
-.cap-title { font-weight: 600; font-size: 15px; flex-basis: 100%; }
-.cap-sub { color: var(--ink-2); font-size: 12px; flex: 1 1 auto; }
-.toggle { font-size: 12px; padding: 3px 8px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px 18px; margin: 0 0 16px; }
+figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 12px; }
+.cap-title { font-weight: 600; font-size: var(--fs-title); flex-basis: 100%; }
+.cap-sub { color: var(--ink-2); font-size: var(--fs-sub); flex: 1 1 auto; }
+.toggle { font-size: var(--fs-small); padding: 4px 10px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 820px) { .two { grid-template-columns: 1fr; } }
 
-.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); }
-.legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--fs-sub); color: var(--ink-2); }
+.legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 
-/* 横棒: 1 行 = ラベル列 + バー列 + 値列。バーは <=24px、先端 4px 丸、基線側は角。 */
-.bars { display: grid; grid-template-columns: minmax(140px, 32%) 1fr 72px; gap: 6px 10px; align-items: center; }
-.bars .lbl { font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bars .lbl small { color: var(--muted); margin-left: 6px; }
+/* 横棒: 1 項目 = 2 段(上段ラベル全幅・最大 2 行 / 下段 棒 + 値)。棒は <=24px、先端 4px 丸、基線側は角。 */
+.bars { display: grid; grid-template-columns: 1fr var(--val-w); gap: 4px 12px; align-items: center; }
+.bars .lbl {
+  grid-column: 1 / -1; margin-top: var(--row-gap); font-size: var(--fs-label); color: var(--ink); line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+.bars .lbl:first-child { margin-top: 0; }
+.bars .lbl small { display: block; font-size: var(--fs-small); color: var(--ink-2); margin-top: 2px; }
 .bars .lbl.clickable { cursor: pointer; }
 .bars .lbl.clickable:hover { text-decoration: underline; }
-.bars .track { position: relative; height: 18px; display: flex; gap: 2px; min-width: 0; }
+.bars .track { position: relative; height: var(--bar-h); display: flex; gap: 2px; min-width: 0; }
 .bars .seg { height: 100%; min-width: 0; }
 .bars .seg:last-child { border-radius: 0 4px 4px 0; }
 .bars .seg:first-child { border-radius: 0; }
 .bars .seg:first-child:last-child { border-radius: 0 4px 4px 0; }
-.bars .val { font-size: 12px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+.bars .val { font-size: var(--fs-value); color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
 .bars.single .seg { background: var(--s-single); border-radius: 0 4px 4px 0; }
 .seg.cacheRead { background: var(--s-cache-read); }
 .seg.cacheCreation { background: var(--s-cache-create); }
 .seg.input { background: var(--s-input); }
 .seg.output { background: var(--s-output); }
 .bars .track:hover .seg { filter: brightness(1.08); }
-.empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+.empty { color: var(--ink-2); font-size: var(--fs-sub); padding: 12px 0; }
+.more { display: flex; justify-content: center; margin-top: 14px; }
+.more button { padding: 8px 18px; }
 
-.tableview table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
-.tableview th, .tableview td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
-.tableview th { color: var(--ink-2); font-weight: 600; }
+/* 表ビュー: グラフと同じ数値を WCAG 的に読める形で */
+.tableview { max-height: 70vh; overflow: auto; }
+.tableview table { border-collapse: collapse; width: 100%; font-size: var(--fs-sub); }
+.tableview th, .tableview td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+.tableview th { color: var(--ink-2); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
 .tableview td.num, .tableview th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tableview td.total { font-weight: 600; }
 
-.sessions { max-height: 420px; overflow: auto; }
-.sess { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 7px 6px; border-bottom: 1px solid var(--grid); cursor: pointer; border-radius: 4px; }
-.sess:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
-.sess .t { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sess .d { font-size: 11px; color: var(--muted); grid-column: 1; }
-.sess .n { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; grid-row: 1 / span 2; align-self: center; }
+/* セッション一覧: クリック可能だと分かる行 */
+.sessions { max-height: 480px; overflow: auto; }
+.sess { display: grid; grid-template-columns: 1fr auto auto; gap: 2px 12px; padding: 9px 8px; border-bottom: 1px solid var(--grid); cursor: pointer; border-radius: 4px; align-items: center; }
+.sess:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.sess .t { grid-column: 1; grid-row: 1; font-size: var(--fs-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess .d { grid-column: 1; grid-row: 2; font-size: var(--fs-small); color: var(--ink-2); }
+.sess .n { grid-column: 2; grid-row: 1 / span 2; font-size: var(--fs-value); color: var(--ink); font-variant-numeric: tabular-nums; }
+.sess::after { content: "›"; grid-column: 3; grid-row: 1 / span 2; color: var(--ink-2); font-size: calc(var(--fs-title) + 4px); line-height: 1; }
 
-.tooltip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); box-shadow: 0 4px 16px rgba(0,0,0,0.12); border-radius: 8px; padding: 8px 10px; font-size: 12px; max-width: 360px; }
-.tooltip .tt-title { font-weight: 600; margin-bottom: 4px; word-break: break-word; }
+.tooltip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); box-shadow: 0 4px 16px rgba(0,0,0,0.12); border-radius: 8px; padding: 10px 12px; font-size: var(--fs-sub); max-width: 420px; }
+.tooltip .tt-title { font-weight: 600; margin-bottom: 6px; word-break: break-word; }
 .tooltip .row { display: flex; justify-content: space-between; gap: 16px; }
 .tooltip .row span:last-child { font-variant-numeric: tabular-nums; }
-.tooltip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.tooltip .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }

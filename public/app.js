@@ -7,7 +7,8 @@
     { key: 'input', label: '入力', cls: 'input' },
     { key: 'output', label: '出力', cls: 'output' },
   ];
-  const state = { project: '', sinceDays: '', sort: 'total', limit: 50, overview: null };
+  const PAGE = 20; // 「もっと見る」1 回で増える件数
+  const state = { project: '', sinceDays: '', sort: 'total', limit: PAGE, extra: 0, overview: null };
 
   const fmt = (n) => {
     if (n == null) return '–';
@@ -34,6 +35,13 @@
     return d.toISOString();
   }
 
+  // ---- density (文字サイズ) ---------------------------------------------
+  function applyDensity(name) {
+    document.documentElement.dataset.density = name;
+    try { localStorage.setItem('aiad-density', name); } catch { /* 保存できなくても描画はする */ }
+    for (const b of document.querySelectorAll('.density button')) b.setAttribute('aria-pressed', String(b.dataset.density === name));
+  }
+
   // ---- tooltip -------------------------------------------------------------
   const tip = $('tooltip');
   function showTip(e, html) {
@@ -56,7 +64,7 @@
     return `<div class="tt-title">${esc(title)}</div>${rows}<div class="row"><span>合計</span><span><b>${full(u.total)}</b></span></div>${extra}`;
   }
 
-  // ---- bar rows -----------------------------------------------------------
+  // ---- bar rows (上段ラベル / 下段 棒 + 値) ----------------------------------
   function stackedRow(label, sub, u, max, tipTitle, tipExtra, onClick) {
     const lbl = document.createElement('div');
     lbl.className = 'lbl' + (onClick ? ' clickable' : '');
@@ -91,25 +99,26 @@
     container.appendChild(frag);
   }
   function usageTable(headers, rows) {
-    const th = headers.map((h) => `<th class="${h.num ? 'num' : ''}">${esc(h.label)}</th>`).join('');
-    const body = rows.map((r) => '<tr>' + r.map((c, i) => `<td class="${headers[i].num ? 'num' : ''}">${esc(c)}</td>`).join('') + '</tr>').join('');
+    const cls = (h) => [h.num ? 'num' : '', h.total ? 'total' : ''].filter(Boolean).join(' ');
+    const th = headers.map((h) => `<th class="${cls(h)}">${esc(h.label)}</th>`).join('');
+    const body = rows.map((r) => '<tr>' + r.map((c, i) => `<td class="${cls(headers[i])}">${esc(c)}</td>`).join('') + '</tr>').join('');
     return `<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
   }
-  const usageCols = [{ label: 'キャッシュ読取', num: true }, { label: 'キャッシュ作成', num: true }, { label: '入力', num: true }, { label: '出力', num: true }, { label: '合計', num: true }];
+  const usageCols = [{ label: 'キャッシュ読取', num: true }, { label: 'キャッシュ作成', num: true }, { label: '入力', num: true }, { label: '出力', num: true }, { label: '合計', num: true, total: true }];
   const usageCells = (u) => [full(u.cacheRead), full(u.cacheCreation), full(u.input), full(u.output), full(u.total)];
 
   // ---- sections -----------------------------------------------------------
   function renderLegend() {
     $('legend').innerHTML = SERIES.map((s) => `<span><i class="sw seg ${s.cls}"></i>${s.label}</span>`).join('');
   }
-  function renderTiles(totals, promptsShown) {
+  function renderTiles(totals, promptsShown, scopeLabel) {
     const u = totals.usage;
+    $('hero').innerHTML = `<div class="label">合計トークン${scopeLabel ? ' — ' + esc(scopeLabel) : ''}</div><div class="value">${fmt(u.total)}</div><div class="note">${full(u.total)} トークン / ${full(totals.apiCalls)} API 応答</div>`;
     const tiles = [
-      ['合計トークン', fmt(u.total), full(u.total)],
       ['出力トークン', fmt(u.output), '応答として生成された分'],
       ['キャッシュ読取', fmt(u.cacheRead), (u.total ? Math.round((u.cacheRead / u.total) * 100) : 0) + '% が再利用'],
-      ['指示の数', full(totals.prompts), `${full(totals.apiCalls)} API 応答`],
-      ['セッション', full(totals.sessions), promptsShown != null ? `表示中の指示 ${full(promptsShown)} 件` : ''],
+      ['指示の数', full(totals.prompts), promptsShown != null ? `条件に合う指示 ${full(promptsShown)} 件` : ''],
+      ['セッション', full(totals.sessions), ''],
     ];
     $('tiles').innerHTML = tiles.map(([l, v, n]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join('');
   }
@@ -122,19 +131,23 @@
     sel.innerHTML = '<option value="">すべて</option>' + o.projects.map((p) => `<option value="${esc(p.key)}">${esc(projName(p.key, p.cwd))} (${fmt(p.usage.total)})</option>`).join('');
     sel.value = cur;
     const max = Math.max(0, ...o.projects.map((p) => p.usage.total));
-    renderBars($('projectBars'), o.projects.map((p) => stackedRow(projName(p.key, p.cwd), `${p.sessions} セッション`, p.usage, max, p.cwd || p.key, `<div class="row"><span>指示</span><span>${full(p.prompts)}</span></div>`, () => { sel.value = p.key; onFilterChange(); })));
+    renderBars($('projectBars'), o.projects.map((p) => stackedRow(projName(p.key, p.cwd), `${p.sessions} セッション · 指示 ${p.prompts} 件`, p.usage, max, p.cwd || p.key, `<div class="row"><span>指示</span><span>${full(p.prompts)}</span></div>`, () => { sel.value = p.key; onFilterChange(); })));
     $('projectsTable').innerHTML = usageTable([{ label: 'プロジェクト' }, { label: 'セッション', num: true }, { label: '指示', num: true }, ...usageCols], o.projects.map((p) => [projName(p.key, p.cwd), full(p.sessions), full(p.prompts), ...usageCells(p.usage)]));
     return o;
   }
   async function loadPrompts() {
-    const q = new URLSearchParams({ project: state.project, sort: state.sort, limit: state.limit, since: sinceISO() });
+    const limit = state.limit + state.extra;
+    const q = new URLSearchParams({ project: state.project, sort: state.sort, limit, since: sinceISO() });
     const r = await getJSON('/api/prompts?' + q);
     const max = Math.max(0, ...r.prompts.map((p) => p.usage.total));
-    renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)}`, p.usage, max, p.text,
+    renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)} · API ${p.apiCalls} 回`, p.usage, max, p.text,
       `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div><div class="row"><span>セッション</span><span>${esc(p.sessionTitle || '')}</span></div>`,
       () => openSession(p.sessionId))));
     $('promptsTable').innerHTML = usageTable([{ label: '日時' }, { label: '指示' }, { label: 'プロジェクト' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
       r.prompts.map((p) => [when(p.timestamp), p.text, projName(p.projectKey, p.cwd), full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
+    const more = $('moreBtn');
+    more.hidden = r.count <= r.prompts.length;
+    more.textContent = `もっと見る(${full(r.prompts.length)} / ${full(r.count)} 件)`;
     return r;
   }
   async function loadSessions() {
@@ -154,7 +167,7 @@
     $('detailTitle').textContent = `セッション: ${s.title}`;
     $('detailSub').textContent = `${when(s.startedAt)} 〜 ${when(s.endedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · 合計 ${full(s.usage.total)} トークン · ${Object.keys(s.models).join(', ')}`;
     const max = Math.max(0, ...s.promptList.map((p) => p.usage.total));
-    renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, when(p.timestamp), p.usage, max, p.text,
+    renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, `${when(p.timestamp)} · API ${p.apiCalls} 回 · ツール ${p.toolUses} 回`, p.usage, max, p.text,
       `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div>`)));
     $('detailTable').innerHTML = usageTable([{ label: '#', num: true }, { label: '日時' }, { label: '指示' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
       s.promptList.map((p) => [p.index + 1, when(p.timestamp), p.text, full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
@@ -164,17 +177,19 @@
   }
 
   // ---- wiring -------------------------------------------------------------
-  async function onFilterChange() {
+  async function onFilterChange(keepExtra = false) {
     state.project = $('projectSel').value;
     state.sinceDays = $('sinceSel').value;
     state.sort = $('sortSel').value;
     state.limit = Number($('limitSel').value);
+    if (!keepExtra) state.extra = 0;
     document.body.style.opacity = '0.85';
     try {
       const [, r] = await Promise.all([loadSessions(), loadPrompts()]);
       const o = state.overview;
-      const totals = state.project ? (() => { const p = o.projects.find((x) => x.key === state.project); return p ? { sessions: p.sessions, prompts: p.prompts, apiCalls: p.apiCalls, usage: p.usage } : o.totals; })() : o.totals;
-      renderTiles(totals, r.count);
+      const proj = state.project ? o.projects.find((x) => x.key === state.project) : null;
+      const totals = proj ? { sessions: proj.sessions, prompts: proj.prompts, apiCalls: proj.apiCalls, usage: proj.usage } : o.totals;
+      renderTiles(totals, r.count, proj ? projName(proj.key, proj.cwd) : '');
     } finally {
       document.body.style.opacity = '';
     }
@@ -188,11 +203,13 @@
       console.error(e);
     }
   }
-  for (const id of ['projectSel', 'sinceSel', 'sortSel', 'limitSel']) $(id).addEventListener('change', onFilterChange);
+  for (const id of ['projectSel', 'sinceSel', 'sortSel', 'limitSel']) $(id).addEventListener('change', () => onFilterChange());
+  $('moreBtn').addEventListener('click', () => { state.extra += PAGE; onFilterChange(true); });
   $('rescanBtn').addEventListener('click', async () => {
     $('rescanBtn').disabled = true;
     try { await getJSON('/api/rescan', { method: 'POST' }); await refreshAll(); } finally { $('rescanBtn').disabled = false; }
   });
+  for (const b of document.querySelectorAll('.density button')) b.addEventListener('click', () => applyDensity(b.dataset.density));
   document.addEventListener('click', (e) => {
     const b = e.target.closest('.toggle[data-target]');
     if (!b) return;
@@ -204,6 +221,7 @@
   });
   $('detailClose').addEventListener('click', () => { $('sessionDetail').hidden = true; });
 
+  applyDensity(document.documentElement.dataset.density || 'normal');
   renderLegend();
   refreshAll();
 })();

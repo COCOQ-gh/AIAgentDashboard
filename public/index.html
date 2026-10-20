@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI Agent Dashboard</title>
 <link rel="stylesheet" href="/style.css">
+<script>
+  // 文字サイズ(密度)の設定は描画前に反映してちらつきを防ぐ
+  try { document.documentElement.dataset.density = localStorage.getItem('aiad-density') || 'normal'; } catch (e) { document.documentElement.dataset.density = 'normal'; }
+</script>
 </head>
 <body>
 <header class="topbar">
@@ -34,27 +38,35 @@
   </label>
   <label>件数
     <select id="limitSel">
-      <option value="20">20</option>
-      <option value="50" selected>50</option>
+      <option value="20" selected>20</option>
+      <option value="50">50</option>
       <option value="100">100</option>
-      <option value="300">300</option>
     </select>
   </label>
   <button id="rescanBtn" type="button">再走査</button>
+  <div class="density">文字サイズ
+    <div class="group" role="group" aria-label="文字サイズ">
+      <button type="button" data-density="compact">小</button>
+      <button type="button" data-density="normal">標準</button>
+      <button type="button" data-density="large">大</button>
+    </div>
+  </div>
 </section>
 
 <main>
-  <section class="tiles" id="tiles" aria-label="合計"></section>
+  <section class="hero" id="hero" aria-label="合計トークン"></section>
+  <section class="tiles" id="tiles" aria-label="内訳"></section>
 
   <figure class="card" id="promptsCard">
     <figcaption>
       <div class="cap-title">トークン消費の多い指示</div>
-      <div class="cap-sub">1 本 = 人間の 1 指示。その指示から次の指示までに発生した API 応答の usage 合計(サブエージェント含む)。</div>
+      <div class="cap-sub">1 項目 = 人間の 1 指示。その指示から次の指示までに発生した API 応答の usage 合計(サブエージェント含む)。</div>
       <div class="legend" id="legend"></div>
       <button type="button" class="toggle" data-target="promptsTable">表で見る</button>
     </figcaption>
     <div class="bars" id="promptBars"></div>
     <div class="tableview" id="promptsTable" hidden></div>
+    <div class="more"><button type="button" id="moreBtn" hidden>もっと見る</button></div>
   </figure>
 
   <div class="two">
