@@ -59,6 +59,7 @@
     <nav class="tabs" role="tablist" aria-label="表示の切替">
       <button role="tab" type="button" id="tab-prompts" aria-controls="pane-prompts" aria-selected="true">指示</button>
       <button role="tab" type="button" id="tab-breakdown" aria-controls="pane-breakdown" aria-selected="false">キャッシュ内訳</button>
+      <button role="tab" type="button" id="tab-models" aria-controls="pane-models" aria-selected="false">モデル</button>
       <button role="tab" type="button" id="tab-sessions" aria-controls="pane-sessions" aria-selected="false">セッション</button>
       <button role="tab" type="button" id="tab-detail" aria-controls="pane-detail" aria-selected="false" hidden>セッション詳細</button>
     </nav>
@@ -111,6 +112,17 @@
         </figure>
       </section>
 
+      <section class="pane" role="tabpanel" id="pane-models" aria-labelledby="tab-models" hidden>
+        <div class="pane-bar">
+          <div class="cap-title">モデル別の内訳</div>
+          <div class="legend" id="modelLegend"></div>
+          <button type="button" class="toggle" data-target="modelsTable">表で見る</button>
+        </div>
+        <p class="pane-note" id="modelsSub">1 項目 = 1 モデル。API 応答(call)単位で、モデルが途中で切り替わったセッションも別々に数える(サブエージェント含む)。</p>
+        <div class="bars" id="modelBars"></div>
+        <div class="tableview" id="modelsTable" hidden></div>
+      </section>
+
       <section class="pane" role="tabpanel" id="pane-sessions" aria-labelledby="tab-sessions" hidden>
         <p class="pane-note">クリックで指示ごとの内訳を開く。</p>
         <div class="sessions" id="sessionList"></div>
@@ -123,6 +135,9 @@
           <button type="button" class="toggle" id="detailClose">閉じる</button>
         </div>
         <p class="pane-note" id="detailSub"></p>
+        <div class="pane-sub" id="detailModelsHead" hidden>モデル別</div>
+        <div class="bars" id="detailModelBars" hidden></div>
+        <div class="pane-sub">指示ごと</div>
         <div class="bars" id="detailBars"></div>
         <div class="tableview" id="detailTable" hidden></div>
       </section>

@@ -3,6 +3,8 @@
 //   GET /api/prompts?project=&limit=&sort=  指示一覧(トークン降順など)
 //   GET /api/sessions?project=              セッション一覧
 //   GET /api/session?id=                    1 セッションの指示別内訳
+//   GET /api/breakdown?project=&since=      キャッシュ作成の原因 / キャッシュ読取の構成
+//   GET /api/models?project=&since=         モデル別の内訳(call 単位)
 //   GET /api/report?session=&top=           AI エージェント向けレポート(コンテキスト推定・ツール別追加・提案)
 //   POST /api/rescan                        キャッシュを使って再走査
 import http from 'node:http';
@@ -13,6 +15,7 @@ import { TranscriptStore, summarizeProjects, sessionSummary, flattenPrompts, pro
 import { emptyUsage, addUsage } from './parse.mjs';
 import { buildReport } from './report.mjs';
 import { analyzeSession, emptyBreakdown, addBreakdown, causeRows, componentRows } from './attribution.mjs';
+import { modelRows } from './models.mjs';
 
 // セッションごとのキャッシュ内訳(since 無し)はセッションオブジェクトに紐づけてメモ化する(再走査で作り直される)
 const analysisCache = new WeakMap();
@@ -89,7 +92,7 @@ async function api(url, req, res) {
     if (!s) return json(res, 404, { error: 'session not found' });
     const a = analysisFor(s);
     const promptList = s.prompts.map((p) => ({ ...promptView(p), ...(a.promptExtras[p.index] || { modelSwitches: 0, switchTokens: 0 }) }));
-    return json(res, 200, { ...sessionSummary(s), promptList, breakdown: { ...breakdownView(a), switches: a.switches } });
+    return json(res, 200, { ...sessionSummary(s), promptList, modelRows: modelRows([s]), breakdown: { ...breakdownView(a), switches: a.switches } });
   }
   if (url.pathname === '/api/breakdown') {
     // キャッシュ作成の原因 / キャッシュ読取の構成(project・since で絞る)
@@ -97,6 +100,12 @@ async function api(url, req, res) {
     const total = emptyBreakdown();
     for (const s of filterByProject(sessions, project)) addBreakdown(total, since ? analyzeSession(s, { since }) : analysisFor(s));
     return json(res, 200, breakdownView(total));
+  }
+  if (url.pathname === '/api/models') {
+    // モデル別の内訳(project・since で絞る)。call 単位で集計する(src/models.mjs)
+    const since = url.searchParams.get('since') || '';
+    const rows = modelRows(filterByProject(sessions, project), { since });
+    return json(res, 200, { models: rows });
   }
   if (url.pathname === '/api/report') {
     // AI エージェント向け: 1 セッションの消費・コンテキスト推定・ツール別の文脈追加・提案(src/report.mjs)

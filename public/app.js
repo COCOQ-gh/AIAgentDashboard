@@ -10,7 +10,7 @@
     { key: 'output', label: '出力', cls: 'output' },
   ];
   const PAGE = 20; // 「もっと見る」1 回で増える件数
-  const TABS = ['prompts', 'breakdown', 'sessions', 'detail'];
+  const TABS = ['prompts', 'breakdown', 'models', 'sessions', 'detail'];
   const state = {
     project: '', sinceDays: '', sort: 'total', limit: PAGE, extra: 0, overview: null,
     projQuery: '', projSort: 'total', tab: 'prompts', prevTab: 'prompts',
@@ -207,7 +207,9 @@
 
   // ---- sections -----------------------------------------------------------
   function renderLegend() {
-    $('legend').innerHTML = SERIES.map((s) => `<span><i class="sw seg ${s.cls}"></i>${s.label}</span>`).join('');
+    const html = SERIES.map((s) => `<span><i class="sw seg ${s.cls}"></i>${s.label}</span>`).join('');
+    $('legend').innerHTML = html;
+    $('modelLegend').innerHTML = html;
   }
   function renderKpis(totals, promptsShown, scopeLabel) {
     const u = totals.usage;
@@ -262,6 +264,21 @@
     $('compSub').textContent = `キャッシュ読取 ${fmt(b.cacheRead)} トークンを「文脈に積まれた内容の由来」で按分した概算(出力は上限側)。`;
     $('compTable').innerHTML = usageTable([{ label: '文脈の由来' }, { label: 'トークン', num: true, total: true }, { label: '比率', num: true }], comps.map((r) => [r.label, full(r.tokens), pct(r.pct)]));
   }
+  // モデル別の行(モデルタブとセッション詳細で共用)。比率は合計トークンに対する割合
+  const pctText = (x) => (x >= 0.995 ? '100%' : x >= 0.1 ? Math.round(x * 100) + '%' : (x * 100).toFixed(1) + '%');
+  function modelBarRows(rows) {
+    const max = Math.max(0, ...rows.map((r) => r.usage.total));
+    return rows.map((r) => stackedRow(r.model, `${pctText(r.share)} · API ${full(r.calls)} 回 · ${full(r.sessions)} セッション · ${day(r.firstAt)}〜${day(r.lastAt)}`, r.usage, max, r.model,
+      `<div class="row"><span>API 応答</span><span>${full(r.calls)}</span></div><div class="row"><span>セッション</span><span>${full(r.sessions)}</span></div><div class="row"><span>全体に占める比率</span><span>${pctText(r.share)}</span></div>`));
+  }
+  const modelCols = [{ label: 'モデル' }, { label: '比率', num: true }, { label: 'API', num: true }, { label: 'セッション', num: true }, ...usageCols];
+  const modelCells = (r) => [r.model, pctText(r.share), full(r.calls), full(r.sessions), ...usageCells(r.usage)];
+  async function loadModels() {
+    const r = await getJSON('/api/models?' + new URLSearchParams({ project: state.project, since: sinceISO() }));
+    renderBars($('modelBars'), modelBarRows(r.models));
+    $('modelsTable').innerHTML = usageTable(modelCols, r.models.map(modelCells));
+    return r;
+  }
   async function loadSessions() {
     const r = await getJSON('/api/sessions?' + new URLSearchParams({ project: state.project }));
     const list = $('sessionList');
@@ -282,6 +299,10 @@
     const max = Math.max(0, ...s.promptList.map((p) => p.usage.total));
     renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, `${when(p.timestamp)} · API ${p.apiCalls} 回 · ツール ${p.toolUses} 回${p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回` : ''}`, p.usage, max, p.text,
       `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div>`)));
+    const showModels = s.modelRows && s.modelRows.length > 0;
+    $('detailModelsHead').hidden = !showModels;
+    $('detailModelBars').hidden = !showModels;
+    renderBars($('detailModelBars'), showModels ? modelBarRows(s.modelRows) : []);
     $('detailTable').innerHTML = usageTable([{ label: '#', num: true }, { label: '日時' }, { label: '指示' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
       s.promptList.map((p) => [p.index + 1, when(p.timestamp), p.text, full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
     $('tab-detail').hidden = false;
@@ -296,7 +317,7 @@
     if (!keepExtra) state.extra = 0;
     document.body.style.opacity = '0.85';
     try {
-      const [, r] = await Promise.all([loadSessions(), loadPrompts(), loadBreakdown()]);
+      const [, r] = await Promise.all([loadSessions(), loadPrompts(), loadBreakdown(), loadModels()]);
       const o = state.overview;
       const proj = state.project ? o.projects.find((x) => x.key === state.project) : null;
       const totals = proj ? { sessions: proj.sessions, prompts: proj.prompts, apiCalls: proj.apiCalls, usage: proj.usage } : o.totals;
@@ -328,7 +349,7 @@
     const b = e.target.closest('.toggle[data-target]');
     if (!b) return;
     const t = $(b.dataset.target);
-    const bars = b.closest('figure, .pane').querySelector('.bars');
+    const bars = t.previousElementSibling; // 表の直前の .bars(ペイン内に複数あっても対応する側だけ切り替える)
     t.hidden = !t.hidden;
     bars.hidden = !t.hidden;
     b.textContent = t.hidden ? '表で見る' : 'グラフで見る';
