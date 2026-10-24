@@ -11,116 +11,124 @@
 </script>
 </head>
 <body>
+<!-- 画面は「固定高のシェル + 各ペインの内部スクロール」。ページ自体はスクロールしない。 -->
 <header class="topbar">
-  <h1>AI Agent Dashboard <span class="sub">Claude Code のトークン消費を指示ごとに見る</span></h1>
+  <h1>AI Agent Dashboard</h1>
   <div class="meta" id="scanMeta">読み込み中…</div>
-</header>
-
-<section class="filters" aria-label="フィルタ">
-  <label>プロジェクト
-    <select id="projectSel"><option value="">すべて</option></select>
-  </label>
-  <label>期間
-    <select id="sinceSel">
-      <option value="">全期間</option>
-      <option value="1">今日</option>
-      <option value="7">直近 7 日</option>
-      <option value="30">直近 30 日</option>
-      <option value="90">直近 90 日</option>
-    </select>
-  </label>
-  <label>並び
-    <select id="sortSel">
-      <option value="total">合計トークン</option>
-      <option value="output">出力トークン</option>
-      <option value="recent">新しい順</option>
-    </select>
-  </label>
-  <label>件数
-    <select id="limitSel">
-      <option value="20" selected>20</option>
-      <option value="50">50</option>
-      <option value="100">100</option>
-    </select>
-  </label>
-  <button id="rescanBtn" type="button">再走査</button>
-  <div class="density">文字サイズ
+  <div class="topctl">
+    <label>期間
+      <select id="sinceSel">
+        <option value="">全期間</option>
+        <option value="1">今日</option>
+        <option value="7">直近 7 日</option>
+        <option value="30">直近 30 日</option>
+        <option value="90">直近 90 日</option>
+      </select>
+    </label>
+    <button id="rescanBtn" type="button">再走査</button>
     <div class="group" role="group" aria-label="文字サイズ">
-      <button type="button" data-density="compact">小</button>
-      <button type="button" data-density="normal">標準</button>
-      <button type="button" data-density="large">大</button>
+      <button type="button" data-density="compact" title="文字サイズ 小">小</button>
+      <button type="button" data-density="normal" title="文字サイズ 標準">標準</button>
+      <button type="button" data-density="large" title="文字サイズ 大">大</button>
     </div>
   </div>
-</section>
+</header>
 
-<main>
-  <section class="hero" id="hero" aria-label="合計トークン"></section>
-  <section class="tiles" id="tiles" aria-label="内訳"></section>
+<div class="shell">
+  <!-- 左サイドバー: プロジェクト一覧(検索・ソート付き)。全グラフのフィルタを兼ねる。 -->
+  <aside class="sidebar" aria-label="プロジェクト">
+    <div class="side-head">
+      <span class="side-title">プロジェクト</span>
+      <span class="side-count" id="projCount"></span>
+    </div>
+    <div class="side-ctl">
+      <input type="search" id="projQuery" placeholder="名前・パスで検索" aria-label="プロジェクトを検索" autocomplete="off">
+      <select id="projSort" aria-label="プロジェクトの並び">
+        <option value="total">合計トークン順</option>
+        <option value="recent">最終更新順</option>
+        <option value="name">名前順</option>
+        <option value="sessions">セッション数順</option>
+      </select>
+    </div>
+    <ul class="side-list" id="projList"></ul>
+  </aside>
 
-  <figure class="card" id="promptsCard">
-    <figcaption>
-      <div class="cap-title">トークン消費の多い指示</div>
-      <div class="cap-sub">1 項目 = 人間の 1 指示。その指示から次の指示までに発生した API 応答の usage 合計(サブエージェント含む)。</div>
-      <div class="legend" id="legend"></div>
-      <button type="button" class="toggle" data-target="promptsTable">表で見る</button>
-    </figcaption>
-    <div class="bars" id="promptBars"></div>
-    <div class="tableview" id="promptsTable" hidden></div>
-    <div class="more"><button type="button" id="moreBtn" hidden>もっと見る</button></div>
-  </figure>
+  <main>
+    <section class="kpis" id="kpis" aria-label="合計"></section>
 
-  <div class="two">
-    <figure class="card" id="causeCard">
-      <figcaption>
-        <div class="cap-title">キャッシュ作成の原因</div>
-        <div class="cap-sub" id="causeSub">直前の API 応答との関係で分類。モデル切替・長いアイドル・圧縮は「同じ文脈の作り直し」。</div>
-        <button type="button" class="toggle" data-target="causeTable">表で見る</button>
-      </figcaption>
-      <div class="bars single" id="causeBars"></div>
-      <div class="tableview" id="causeTable" hidden></div>
-    </figure>
+    <nav class="tabs" role="tablist" aria-label="表示の切替">
+      <button role="tab" type="button" id="tab-prompts" aria-controls="pane-prompts" aria-selected="true">指示</button>
+      <button role="tab" type="button" id="tab-breakdown" aria-controls="pane-breakdown" aria-selected="false">キャッシュ内訳</button>
+      <button role="tab" type="button" id="tab-sessions" aria-controls="pane-sessions" aria-selected="false">セッション</button>
+      <button role="tab" type="button" id="tab-detail" aria-controls="pane-detail" aria-selected="false" hidden>セッション詳細</button>
+    </nav>
 
-    <figure class="card" id="compCard">
-      <figcaption>
-        <div class="cap-title">キャッシュ読取の構成(概算)</div>
-        <div class="cap-sub" id="compSub">毎回再送されている文脈が「何でできているか」。文脈に積まれた内容の由来で按分。</div>
-        <button type="button" class="toggle" data-target="compTable">表で見る</button>
-      </figcaption>
-      <div class="bars single" id="compBars"></div>
-      <div class="tableview" id="compTable" hidden></div>
-    </figure>
-  </div>
+    <div class="panes">
+      <section class="pane" role="tabpanel" id="pane-prompts" aria-labelledby="tab-prompts">
+        <div class="pane-bar">
+          <label>並び
+            <select id="sortSel">
+              <option value="total">合計トークン</option>
+              <option value="output">出力トークン</option>
+              <option value="recent">新しい順</option>
+            </select>
+          </label>
+          <label>件数
+            <select id="limitSel">
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <div class="legend" id="legend"></div>
+          <button type="button" class="toggle" data-target="promptsTable">表で見る</button>
+        </div>
+        <p class="pane-note">1 項目 = 人間の 1 指示。その指示から次の指示までに発生した API 応答の usage 合計(サブエージェント含む)。クリックでセッション詳細。</p>
+        <div class="bars" id="promptBars"></div>
+        <div class="tableview" id="promptsTable" hidden></div>
+        <div class="more"><button type="button" id="moreBtn" hidden>もっと見る</button></div>
+      </section>
 
-  <div class="two">
-    <figure class="card" id="projectsCard">
-      <figcaption>
-        <div class="cap-title">プロジェクト別 合計トークン</div>
-        <button type="button" class="toggle" data-target="projectsTable">表で見る</button>
-      </figcaption>
-      <div class="bars single" id="projectBars"></div>
-      <div class="tableview" id="projectsTable" hidden></div>
-    </figure>
+      <section class="pane two" role="tabpanel" id="pane-breakdown" aria-labelledby="tab-breakdown" hidden>
+        <figure class="card">
+          <figcaption>
+            <div class="cap-title">キャッシュ作成の原因</div>
+            <div class="cap-sub" id="causeSub">直前の API 応答との関係で分類。モデル切替・長いアイドル・圧縮は「同じ文脈の作り直し」。</div>
+            <button type="button" class="toggle" data-target="causeTable">表で見る</button>
+          </figcaption>
+          <div class="bars single" id="causeBars"></div>
+          <div class="tableview" id="causeTable" hidden></div>
+        </figure>
 
-    <figure class="card" id="sessionsCard">
-      <figcaption>
-        <div class="cap-title">セッション</div>
-        <div class="cap-sub">クリックで指示ごとの内訳を開く</div>
-      </figcaption>
-      <div class="sessions" id="sessionList"></div>
-    </figure>
-  </div>
+        <figure class="card">
+          <figcaption>
+            <div class="cap-title">キャッシュ読取の構成(概算)</div>
+            <div class="cap-sub" id="compSub">毎回再送されている文脈が「何でできているか」。文脈に積まれた内容の由来で按分。</div>
+            <button type="button" class="toggle" data-target="compTable">表で見る</button>
+          </figcaption>
+          <div class="bars single" id="compBars"></div>
+          <div class="tableview" id="compTable" hidden></div>
+        </figure>
+      </section>
 
-  <figure class="card" id="sessionDetail" hidden>
-    <figcaption>
-      <div class="cap-title" id="detailTitle"></div>
-      <div class="cap-sub" id="detailSub"></div>
-      <button type="button" class="toggle" data-target="detailTable">表で見る</button>
-      <button type="button" class="toggle" id="detailClose">閉じる</button>
-    </figcaption>
-    <div class="bars" id="detailBars"></div>
-    <div class="tableview" id="detailTable" hidden></div>
-  </figure>
-</main>
+      <section class="pane" role="tabpanel" id="pane-sessions" aria-labelledby="tab-sessions" hidden>
+        <p class="pane-note">クリックで指示ごとの内訳を開く。</p>
+        <div class="sessions" id="sessionList"></div>
+      </section>
+
+      <section class="pane" role="tabpanel" id="pane-detail" aria-labelledby="tab-detail" hidden>
+        <div class="pane-bar">
+          <div class="cap-title" id="detailTitle"></div>
+          <button type="button" class="toggle" data-target="detailTable">表で見る</button>
+          <button type="button" class="toggle" id="detailClose">閉じる</button>
+        </div>
+        <p class="pane-note" id="detailSub"></p>
+        <div class="bars" id="detailBars"></div>
+        <div class="tableview" id="detailTable" hidden></div>
+      </section>
+    </div>
+  </main>
+</div>
 
 <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 <script src="/app.js"></script>

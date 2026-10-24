@@ -4,3 +4,6 @@ doc/HyperHelix/
 node_modules/
 .claude/tmp/
 .claude/settings.local.json
+
+# tools/shot.mjs の出力(スクリーンショット・Chrome プロファイル)
+tmp/

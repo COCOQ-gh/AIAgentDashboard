@@ -1,4 +1,6 @@
-/* ダッシュボードのクライアント。API から JSON を取り、横棒(積み上げ)と表を描く。 */
+/* ダッシュボードのクライアント。API から JSON を取り、横棒(積み上げ)と表を描く。
+   画面は固定高のシェル(上部バー / 左サイドバー / KPI 帯 + タブ + ペイン)で、ページはスクロールしない。
+   プロジェクトの選択は左サイドバー(検索・ソート付き)が唯一の入口で、全グラフのフィルタを兼ねる。 */
 (() => {
   const $ = (id) => document.getElementById(id);
   const SERIES = [
@@ -8,7 +10,11 @@
     { key: 'output', label: '出力', cls: 'output' },
   ];
   const PAGE = 20; // 「もっと見る」1 回で増える件数
-  const state = { project: '', sinceDays: '', sort: 'total', limit: PAGE, extra: 0, overview: null };
+  const TABS = ['prompts', 'breakdown', 'sessions', 'detail'];
+  const state = {
+    project: '', sinceDays: '', sort: 'total', limit: PAGE, extra: 0, overview: null,
+    projQuery: '', projSort: 'total', tab: 'prompts', prevTab: 'prompts',
+  };
 
   const fmt = (n) => {
     if (n == null) return '–';
@@ -19,6 +25,7 @@
   };
   const full = (n) => (n == null ? '–' : n.toLocaleString('ja-JP'));
   const when = (iso) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+  const day = (iso) => (iso ? new Date(iso).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const projName = (key, cwd) => (cwd ? cwd.replace(/\\/g, '/').split('/').filter(Boolean).slice(-2).join('/') : key);
 
@@ -39,7 +46,19 @@
   function applyDensity(name) {
     document.documentElement.dataset.density = name;
     try { localStorage.setItem('aiad-density', name); } catch { /* 保存できなくても描画はする */ }
-    for (const b of document.querySelectorAll('.density button')) b.setAttribute('aria-pressed', String(b.dataset.density === name));
+    for (const b of document.querySelectorAll('.topctl .group button')) b.setAttribute('aria-pressed', String(b.dataset.density === name));
+  }
+
+  // ---- tabs ----------------------------------------------------------------
+  function showTab(name) {
+    if (state.tab !== name) state.prevTab = state.tab;
+    state.tab = name;
+    for (const t of TABS) {
+      const on = t === name;
+      $('tab-' + t).setAttribute('aria-selected', String(on));
+      $('pane-' + t).hidden = !on;
+    }
+    $('pane-' + name).scrollTop = 0;
   }
 
   // ---- tooltip -------------------------------------------------------------
@@ -59,6 +78,11 @@
     tip.style.top = y + 'px';
   }
   function hideTip() { tip.hidden = true; }
+  function attachTip(el, html) {
+    el.addEventListener('mouseenter', (e) => showTip(e, html));
+    el.addEventListener('mousemove', moveTip);
+    el.addEventListener('mouseleave', hideTip);
+  }
   function usageTipHTML(title, u, extra = '') {
     const rows = SERIES.map((s) => `<div class="row"><span><i class="sw seg ${s.cls}"></i>${s.label}</span><span>${full(u[s.key])}</span></div>`).join('');
     return `<div class="tt-title">${esc(title)}</div>${rows}<div class="row"><span>合計</span><span><b>${full(u.total)}</b></span></div>${extra}`;
@@ -82,10 +106,7 @@
       seg.style.flex = `${u[s.key]} 0 0`;
       track.appendChild(seg);
     }
-    const tipHTML = usageTipHTML(tipTitle || label, u, tipExtra);
-    track.addEventListener('mouseenter', (e) => showTip(e, tipHTML));
-    track.addEventListener('mousemove', moveTip);
-    track.addEventListener('mouseleave', hideTip);
+    attachTip(track, usageTipHTML(tipTitle || label, u, tipExtra));
     const val = document.createElement('div');
     val.className = 'val';
     val.textContent = fmt(u.total);
@@ -102,11 +123,7 @@
     const seg = document.createElement('div');
     seg.className = 'seg';
     track.appendChild(seg);
-    if (tipHTML) {
-      track.addEventListener('mouseenter', (e) => showTip(e, tipHTML));
-      track.addEventListener('mousemove', moveTip);
-      track.addEventListener('mouseleave', hideTip);
-    }
+    if (tipHTML) attachTip(track, tipHTML);
     const val = document.createElement('div');
     val.className = 'val';
     val.textContent = fmt(tokens);
@@ -128,32 +145,90 @@
   const usageCols = [{ label: 'キャッシュ読取', num: true }, { label: 'キャッシュ作成', num: true }, { label: '入力', num: true }, { label: '出力', num: true }, { label: '合計', num: true, total: true }];
   const usageCells = (u) => [full(u.cacheRead), full(u.cacheCreation), full(u.input), full(u.output), full(u.total)];
 
+  // ---- sidebar: プロジェクト一覧(検索・ソート) -----------------------------
+  const PROJ_SORT = {
+    total: (a, b) => b.usage.total - a.usage.total,
+    recent: (a, b) => String(b.lastActivity || '').localeCompare(String(a.lastActivity || '')),
+    name: (a, b) => projName(a.key, a.cwd).localeCompare(projName(b.key, b.cwd), 'ja'),
+    sessions: (a, b) => b.sessions - a.sessions || b.usage.total - a.usage.total,
+  };
+  function projRow({ key, label, value, meta, usage, max, title }) {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pj';
+    b.dataset.key = key;
+    b.setAttribute('aria-pressed', String(state.project === key));
+    b.title = title || label;
+    const segs = SERIES.filter((s) => usage[s.key]).map((s) => `<i class="seg ${s.cls}" style="flex:${usage[s.key]} 0 0"></i>`).join('');
+    const w = max > 0 ? Math.max((value / max) * 100, value > 0 ? 1.5 : 0) : 0;
+    b.innerHTML = `<span class="top"><span class="nm">${esc(label)}</span><span class="vl">${fmt(value)}</span></span>`
+      + `<span class="mt">${esc(meta)}</span>`
+      + `<span class="mini"><span class="fill" style="width:${w}%">${segs}</span></span>`;
+    b.addEventListener('click', () => {
+      if (state.project === key) return;
+      state.project = key;
+      renderSidebar();
+      onFilterChange();
+    });
+    attachTip(b, usageTipHTML(title || label, usage));
+    li.appendChild(b);
+    return li;
+  }
+  function renderSidebar() {
+    const o = state.overview;
+    if (!o) return;
+    const q = state.projQuery.trim().toLowerCase();
+    const hit = (p) => !q || [projName(p.key, p.cwd), p.cwd || '', p.key].some((s) => s.toLowerCase().includes(q));
+    const list = o.projects.filter(hit).sort(PROJ_SORT[state.projSort] || PROJ_SORT.total);
+    $('projCount').textContent = q ? `${list.length} / ${o.projects.length}` : String(o.projects.length);
+    const max = Math.max(0, ...o.projects.map((p) => p.usage.total));
+    const ul = $('projList');
+    ul.innerHTML = '';
+    ul.appendChild(projRow({
+      key: '', label: 'すべてのプロジェクト', value: o.totals.usage.total, usage: o.totals.usage,
+      meta: `${full(o.totals.sessions)} セッション · 指示 ${full(o.totals.prompts)} 件`,
+      max: o.totals.usage.total, title: o.projectsDir,
+    }));
+    for (const p of list) {
+      ul.appendChild(projRow({
+        key: p.key, label: projName(p.key, p.cwd), value: p.usage.total, usage: p.usage,
+        meta: `${day(p.lastActivity)} · ${full(p.sessions)} セッション · 指示 ${full(p.prompts)} 件`,
+        max, title: p.cwd || p.key,
+      }));
+    }
+    if (!list.length) {
+      const li = document.createElement('li');
+      li.className = 'side-empty';
+      li.textContent = '該当するプロジェクトがありません';
+      ul.appendChild(li);
+    }
+  }
+
   // ---- sections -----------------------------------------------------------
   function renderLegend() {
     $('legend').innerHTML = SERIES.map((s) => `<span><i class="sw seg ${s.cls}"></i>${s.label}</span>`).join('');
   }
-  function renderTiles(totals, promptsShown, scopeLabel) {
+  function renderKpis(totals, promptsShown, scopeLabel) {
     const u = totals.usage;
-    $('hero').innerHTML = `<div class="label">合計トークン${scopeLabel ? ' — ' + esc(scopeLabel) : ''}</div><div class="value">${fmt(u.total)}</div><div class="note">${full(u.total)} トークン / ${full(totals.apiCalls)} API 応答</div>`;
-    const tiles = [
+    const items = [
+      ['合計トークン' + (scopeLabel ? ` — ${scopeLabel}` : ''), fmt(u.total), `${full(u.total)} / API ${full(totals.apiCalls)} 回`, 'lead'],
       ['出力トークン', fmt(u.output), '応答として生成された分'],
       ['キャッシュ読取', fmt(u.cacheRead), (u.total ? Math.round((u.cacheRead / u.total) * 100) : 0) + '% が再利用'],
-      ['指示の数', full(totals.prompts), promptsShown != null ? `条件に合う指示 ${full(promptsShown)} 件` : ''],
+      ['キャッシュ作成', fmt(u.cacheCreation), '文脈を積み直した分'],
+      ['指示', full(totals.prompts), promptsShown != null ? `条件に合う ${full(promptsShown)} 件` : ''],
       ['セッション', full(totals.sessions), ''],
     ];
-    $('tiles').innerHTML = tiles.map(([l, v, n]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join('');
+    $('kpis').innerHTML = items.map(([l, v, n, cls]) =>
+      `<div class="kpi ${cls || ''}"><div class="l" title="${esc(l)}">${esc(l)}</div><div class="v">${v}</div><div class="n">${esc(n)}</div></div>`).join('');
   }
   async function loadOverview() {
     const o = await getJSON('/api/overview');
     state.overview = o;
     $('scanMeta').textContent = `${o.projectsDir} — ${o.scan ? `${o.scan.files} ファイル / ${o.scan.ms} ms` : '走査中'}`;
-    const sel = $('projectSel');
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">すべて</option>' + o.projects.map((p) => `<option value="${esc(p.key)}">${esc(projName(p.key, p.cwd))} (${fmt(p.usage.total)})</option>`).join('');
-    sel.value = cur;
-    const max = Math.max(0, ...o.projects.map((p) => p.usage.total));
-    renderBars($('projectBars'), o.projects.map((p) => stackedRow(projName(p.key, p.cwd), `${p.sessions} セッション · 指示 ${p.prompts} 件`, p.usage, max, p.cwd || p.key, `<div class="row"><span>指示</span><span>${full(p.prompts)}</span></div>`, () => { sel.value = p.key; onFilterChange(); })));
-    $('projectsTable').innerHTML = usageTable([{ label: 'プロジェクト' }, { label: 'セッション', num: true }, { label: '指示', num: true }, ...usageCols], o.projects.map((p) => [projName(p.key, p.cwd), full(p.sessions), full(p.prompts), ...usageCells(p.usage)]));
+    // 再走査で消えたプロジェクトが選択されたままになるのを防ぐ
+    if (state.project && !o.projects.some((p) => p.key === state.project)) state.project = '';
+    renderSidebar();
     return o;
   }
   async function loadPrompts() {
@@ -209,14 +284,12 @@
       `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div>`)));
     $('detailTable').innerHTML = usageTable([{ label: '#', num: true }, { label: '日時' }, { label: '指示' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
       s.promptList.map((p) => [p.index + 1, when(p.timestamp), p.text, full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
-    const card = $('sessionDetail');
-    card.hidden = false;
-    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('tab-detail').hidden = false;
+    showTab('detail');
   }
 
   // ---- wiring -------------------------------------------------------------
   async function onFilterChange(keepExtra = false) {
-    state.project = $('projectSel').value;
     state.sinceDays = $('sinceSel').value;
     state.sort = $('sortSel').value;
     state.limit = Number($('limitSel').value);
@@ -227,7 +300,7 @@
       const o = state.overview;
       const proj = state.project ? o.projects.find((x) => x.key === state.project) : null;
       const totals = proj ? { sessions: proj.sessions, prompts: proj.prompts, apiCalls: proj.apiCalls, usage: proj.usage } : o.totals;
-      renderTiles(totals, r.count, proj ? projName(proj.key, proj.cwd) : '');
+      renderKpis(totals, r.count, proj ? projName(proj.key, proj.cwd) : '');
     } finally {
       document.body.style.opacity = '';
     }
@@ -241,23 +314,29 @@
       console.error(e);
     }
   }
-  for (const id of ['projectSel', 'sinceSel', 'sortSel', 'limitSel']) $(id).addEventListener('change', () => onFilterChange());
+  for (const id of ['sinceSel', 'sortSel', 'limitSel']) $(id).addEventListener('change', () => onFilterChange());
+  $('projQuery').addEventListener('input', () => { state.projQuery = $('projQuery').value; renderSidebar(); });
+  $('projSort').addEventListener('change', () => { state.projSort = $('projSort').value; renderSidebar(); });
   $('moreBtn').addEventListener('click', () => { state.extra += PAGE; onFilterChange(true); });
   $('rescanBtn').addEventListener('click', async () => {
     $('rescanBtn').disabled = true;
     try { await getJSON('/api/rescan', { method: 'POST' }); await refreshAll(); } finally { $('rescanBtn').disabled = false; }
   });
-  for (const b of document.querySelectorAll('.density button')) b.addEventListener('click', () => applyDensity(b.dataset.density));
+  for (const b of document.querySelectorAll('.topctl .group button')) b.addEventListener('click', () => applyDensity(b.dataset.density));
+  for (const t of TABS) $('tab-' + t).addEventListener('click', () => showTab(t));
   document.addEventListener('click', (e) => {
     const b = e.target.closest('.toggle[data-target]');
     if (!b) return;
     const t = $(b.dataset.target);
-    const bars = b.closest('figure').querySelector('.bars');
+    const bars = b.closest('figure, .pane').querySelector('.bars');
     t.hidden = !t.hidden;
     bars.hidden = !t.hidden;
     b.textContent = t.hidden ? '表で見る' : 'グラフで見る';
   });
-  $('detailClose').addEventListener('click', () => { $('sessionDetail').hidden = true; });
+  $('detailClose').addEventListener('click', () => {
+    $('tab-detail').hidden = true;
+    showTab(state.prevTab === 'detail' ? 'prompts' : state.prevTab);
+  });
 
   applyDensity(document.documentElement.dataset.density || 'normal');
   renderLegend();
