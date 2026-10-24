@@ -82,6 +82,10 @@
               <option value="100">100</option>
             </select>
           </label>
+          <div class="group" role="group" aria-label="棒の分類" id="splitToggle">
+            <button type="button" data-split="1" aria-pressed="true" title="キャッシュ内訳タブと同じ分類で塗り分ける">内訳つき</button>
+            <button type="button" data-split="0" aria-pressed="false" title="キャッシュ読取・作成・入力・出力の 4 区分">4 区分</button>
+          </div>
           <div class="legend" id="legend"></div>
           <button type="button" class="toggle" data-target="promptsTable">表で見る</button>
         </div>
@@ -150,6 +154,7 @@
       <section class="pane" role="tabpanel" id="pane-detail" aria-labelledby="tab-detail" hidden>
         <div class="pane-bar">
           <div class="cap-title" id="detailTitle"></div>
+          <div class="legend" id="detailLegend"></div>
           <button type="button" class="toggle" data-target="detailTable">表で見る</button>
           <button type="button" class="toggle" id="detailClose">閉じる</button>
         </div>

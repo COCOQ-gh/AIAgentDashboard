@@ -74,3 +74,32 @@ test('サブエージェント呼出は除外し、since で集計範囲を絞�
   const rows = causeRows(many);
   assert.deepEqual(rows.map((r) => r.key).sort(), [...CAUSES].sort());
 });
+
+test('指示ごとの分類: 原因別の作成・構成別の読取が、主系列の cache_creation / cache_read に一致する', () => {
+  const s = session([
+    [
+      call({ min: 0, usage: u(1000, 0, 0, 100) }),
+      call({ min: 1, usage: u(0, 300, 1000, 50), tools: ['Read'] }),
+      call({ min: 2, model: 'm2', usage: u(0, 1350, 0, 10) }),
+    ],
+    [
+      call({ min: 90, model: 'm2', usage: u(0, 1360, 0, 10) }),
+      call({ min: 91, model: 'm2', usage: u(0, 20, 1360, 5) }),
+      call({ min: 92, model: 'm2', sidechain: true, usage: u(0, 999, 999, 9) }), // サブエージェント分は分類に含めない
+    ],
+  ]);
+  const b = analyzeSession(s);
+  const sum = (m) => Object.values(m).reduce((n, v) => n + v, 0);
+  // 指示 0: 作成 = 300(通常の追加) + 1350(モデル切替)、読取 = 1000(初回の読取は初期コンテキスト)
+  assert.deepEqual(b.promptExtras[0].creation, { growth: 300, modelSwitch: 1350 });
+  assert.equal(sum(b.promptExtras[0].read), 1000);
+  assert.equal(b.promptExtras[0].read.baseline > 0, true);
+  // 指示 1: 作成 = 1360(アイドル後) + 20(通常の追加)。サブエージェントの 999 は含まない
+  assert.deepEqual(b.promptExtras[1].creation, { idleLong: 1360, growth: 20 });
+  assert.equal(sum(b.promptExtras[1].read), 1360);
+  // 全指示の合計は内訳タブ(breakdown)と一致する(丸めの 1 トークン差まで)
+  const allCreation = sum(b.promptExtras[0].creation) + sum(b.promptExtras[1].creation);
+  assert.equal(allCreation, Math.round(b.cacheCreation));
+  const allRead = sum(b.promptExtras[0].read) + sum(b.promptExtras[1].read);
+  assert.ok(Math.abs(allRead - b.cacheRead) <= 2, `${allRead} vs ${b.cacheRead}`);
+});

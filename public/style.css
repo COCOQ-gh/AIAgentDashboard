@@ -158,6 +158,31 @@ main { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 
 .pane-bar { position: sticky; top: 0; z-index: 2; background: var(--page); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 12px 0 10px; }
 .pane-bar label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--ink-2); }
 .pane-bar .cap-title { flex: 0 1 auto; }
+/* 指示の棒の分類色(キャッシュ内訳タブと同じ区分)。読取 = 青〜紫〜青緑、作成 = 橙〜赤、入力/出力は従来色 */
+:root {
+  --rd-baseline: #1d4f9f; --rd-prompt: #3b82d6; --rd-assistantOutput: #7db3ea;
+  --rd-tool-Bash: #6a4bc4; --rd-tool-Read: #1e9e94; --rd-tool-Edit: #a64bb7; --rd-tool-Write: #c24b8f;
+  --rd-tool-Grep: #4f62c9; --rd-tool-Glob: #7a6a5c; --rd-tool-Agent: #2aa4c8; --rd-tool-other: #8b88b5;
+  --rd-compactedSummary: #a7c6ec; --rd-other: #c3cfdd; --rd-sub: #98a2b3;
+  --cr-first: #a63d12; --cr-growth: #eb6834; --cr-modelSwitch: #d02f3a; --cr-idleLong: #f19a6a;
+  --cr-idleShort: #f7c8a8; --cr-compaction: #7a2a2a; --cr-sub: #b9a090;
+}
+.seg.rd-baseline { background: var(--rd-baseline); } .seg.rd-prompt { background: var(--rd-prompt); }
+.seg.rd-assistantOutput { background: var(--rd-assistantOutput); } .seg.rd-tool-Bash { background: var(--rd-tool-Bash); }
+.seg.rd-tool-Read { background: var(--rd-tool-Read); } .seg.rd-tool-Edit { background: var(--rd-tool-Edit); }
+.seg.rd-tool-Write { background: var(--rd-tool-Write); } .seg.rd-tool-Grep { background: var(--rd-tool-Grep); }
+.seg.rd-tool-Glob { background: var(--rd-tool-Glob); } .seg.rd-tool-Agent { background: var(--rd-tool-Agent); }
+.seg.rd-tool-other { background: var(--rd-tool-other); } .seg.rd-compactedSummary { background: var(--rd-compactedSummary); }
+.seg.rd-other { background: var(--rd-other); } .seg.rd-sub { background: var(--rd-sub); }
+.seg.cr-first { background: var(--cr-first); } .seg.cr-growth { background: var(--cr-growth); }
+.seg.cr-modelSwitch { background: var(--cr-modelSwitch); } .seg.cr-idleLong { background: var(--cr-idleLong); }
+.seg.cr-idleShort { background: var(--cr-idleShort); } .seg.cr-compaction { background: var(--cr-compaction); }
+.seg.cr-sub { background: var(--cr-sub); }
+.bars .track.split { gap: 1px; }
+.legend.split { flex: 1 1 100%; display: grid; gap: 3px; }
+.legend .lg-row { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+.legend .lg-h { font-weight: 600; color: var(--ink); min-width: 12.5em; }
+.tooltip .tt-sec { display: flex; justify-content: space-between; gap: 16px; margin-top: 6px; font-weight: 600; color: var(--ink-2); }
 /* 推移(時系列の積み上げ縦棒) */
 .ts-wrap { margin-top: 4px; }
 .ts-cap { display: flex; justify-content: space-between; font-size: var(--fs-small); color: var(--ink-2); margin-bottom: 4px; }

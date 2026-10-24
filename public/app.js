@@ -13,7 +13,7 @@
   const TABS = ['prompts', 'trend', 'breakdown', 'models', 'sessions', 'detail'];
   const state = {
     project: '', sinceDays: '', sort: 'total', limit: PAGE, extra: 0, overview: null,
-    projQuery: '', projSort: 'total', tab: 'prompts', prevTab: 'prompts', bucket: 'day', metric: 'tokens', trend: null,
+    projQuery: '', projSort: 'total', tab: 'prompts', prevTab: 'prompts', bucket: 'day', metric: 'tokens', trend: null, split: true, detailSession: null,
   };
 
   const fmt = (n) => {
@@ -90,8 +90,77 @@
     return `<div class="tt-title">${esc(title)}</div>${rows}<div class="row"><span>合計</span><span><b>${full(u.total)}</b></span></div>${extra}`;
   }
 
+  // ---- 指示の棒を、キャッシュ内訳タブと同じ分類で塗り分ける -------------------------------
+  // 読取 = 文脈に積まれた内容の由来(初期コンテキスト / 指示 / アシスタント出力 / ツール結果 / 要約)
+  // 作成 = 作成の原因(初回 / 通常の追加 / モデル切替 / アイドル後 / 圧縮)。
+  // 分類は主系列だけが対象なので、サブエージェント分(= usage との差)は別色の「分類外」にする。
+  const KNOWN_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'Agent'];
+  const READ_PARTS = [
+    { key: 'baseline', label: '初期コンテキスト', cls: 'rd-baseline' },
+    { key: 'prompt', label: '指示(+注入文脈)', cls: 'rd-prompt' },
+    { key: 'assistantOutput', label: 'アシスタントの出力', cls: 'rd-assistantOutput' },
+    ...KNOWN_TOOLS.map((t) => ({ key: 'tool:' + t, label: 'ツール結果: ' + t, cls: 'rd-tool-' + t })),
+    { key: 'tool:*', label: 'ツール結果: 他', cls: 'rd-tool-other' },
+    { key: 'compactedSummary', label: '圧縮後の要約', cls: 'rd-compactedSummary' },
+    { key: 'other', label: 'その他', cls: 'rd-other' },
+    { key: 'sub', label: 'サブエージェント(分類外)', cls: 'rd-sub' },
+  ];
+  const CREATE_PARTS = [
+    { key: 'first', label: '初回(初期コンテキスト)', cls: 'cr-first' },
+    { key: 'growth', label: '通常の追加', cls: 'cr-growth' },
+    { key: 'modelSwitch', label: 'モデル切替', cls: 'cr-modelSwitch' },
+    { key: 'idleLong', label: 'アイドル後(60 分超)', cls: 'cr-idleLong' },
+    { key: 'idleShort', label: 'アイドル後(5〜60 分)', cls: 'cr-idleShort' },
+    { key: 'compaction', label: '圧縮(/compact 等)', cls: 'cr-compaction' },
+    { key: 'sub', label: 'サブエージェント(分類外)', cls: 'cr-sub' },
+  ];
+  const sumOf = (m) => Object.values(m).reduce((a, v) => a + v, 0);
+  /** 指示(または call 集計)の API 値から {read, creation} の部品別トークンを作る。分類データが無ければ null。 */
+  function partsOf(p) {
+    if (!p.read && !p.creation) return null;
+    const read = {};
+    const creation = {};
+    for (const [k, v] of Object.entries(p.read || {})) {
+      let key = k;
+      if (k.startsWith('tool:')) {
+        const n = k.slice(5) === 'Task' ? 'Agent' : k.slice(5);
+        key = KNOWN_TOOLS.includes(n) ? 'tool:' + n : 'tool:*';
+      }
+      read[key] = (read[key] || 0) + v;
+    }
+    for (const [k, v] of Object.entries(p.creation || {})) creation[k] = (creation[k] || 0) + v;
+    read.sub = Math.max(0, p.usage.cacheRead - sumOf(read));
+    creation.sub = Math.max(0, p.usage.cacheCreation - sumOf(creation));
+    return { read, creation };
+  }
+  /** 棒の部品の並び: 読取 → 作成 → 入力 → 出力。 */
+  function barSegments(u, parts) {
+    const segs = [];
+    for (const d of READ_PARTS) if (parts.read[d.key] > 0) segs.push({ cls: d.cls, value: parts.read[d.key] });
+    for (const d of CREATE_PARTS) if (parts.creation[d.key] > 0) segs.push({ cls: d.cls, value: parts.creation[d.key] });
+    if (u.input > 0) segs.push({ cls: 'input', value: u.input });
+    if (u.output > 0) segs.push({ cls: 'output', value: u.output });
+    return segs;
+  }
+  function splitTipHTML(title, u, parts, extra = '') {
+    const rows = (defs, m) => defs.filter((d) => m[d.key] > 0).map((d) => `<div class="row"><span><i class="sw seg ${d.cls}"></i>${d.label}</span><span>${full(m[d.key])}</span></div>`).join('');
+    const sec = (label, n) => `<div class="tt-sec"><span>${label}</span><span>${full(n)}</span></div>`;
+    return `<div class="tt-title">${esc(title)}</div>`
+      + sec('キャッシュ読取', u.cacheRead) + rows(READ_PARTS, parts.read)
+      + sec('キャッシュ作成', u.cacheCreation) + rows(CREATE_PARTS, parts.creation)
+      + `<div class="tt-sec"><span>入力・出力</span><span></span></div>`
+      + `<div class="row"><span><i class="sw seg input"></i>入力</span><span>${full(u.input)}</span></div>`
+      + `<div class="row"><span><i class="sw seg output"></i>出力</span><span>${full(u.output)}</span></div>`
+      + `<div class="row"><span>合計</span><span><b>${full(u.total)}</b></span></div>${extra}`;
+  }
+  function splitLegendHTML() {
+    const grp = (title, defs) => `<div class="lg-row"><span class="lg-h">${title}</span>${defs.map((d) => `<span><i class="sw seg ${d.cls}"></i>${d.label}</span>`).join('')}</div>`;
+    return grp('キャッシュ読取(文脈の由来)', READ_PARTS) + grp('キャッシュ作成(原因)', CREATE_PARTS)
+      + `<div class="lg-row"><span class="lg-h">その他</span><span><i class="sw seg input"></i>入力</span><span><i class="sw seg output"></i>出力</span></div>`;
+  }
+
   // ---- bar rows (上段ラベル / 下段 棒 + 値) ----------------------------------
-  function stackedRow(label, sub, u, max, tipTitle, tipExtra, onClick) {
+  function stackedRow(label, sub, u, max, tipTitle, tipExtra, onClick, p) {
     const lbl = document.createElement('div');
     lbl.className = 'lbl' + (onClick ? ' clickable' : '');
     lbl.innerHTML = esc(label) + (sub ? `<small>${esc(sub)}</small>` : '');
@@ -101,14 +170,28 @@
     track.className = 'track';
     const width = max > 0 ? (u.total / max) * 100 : 0;
     track.style.width = Math.max(width, u.total > 0 ? 0.6 : 0) + '%';
-    for (const s of SERIES) {
-      if (!u[s.key]) continue;
-      const seg = document.createElement('div');
-      seg.className = 'seg ' + s.cls;
-      seg.style.flex = `${u[s.key]} 0 0`;
-      track.appendChild(seg);
+    // 分類データ(指示ごとの作成の原因・読取の構成)があり、内訳表示が有効なら細分化して塗る
+    const parts = state.split && p ? partsOf(p) : null;
+    if (parts) {
+      track.classList.add('split');
+      for (const s of barSegments(u, parts)) {
+        if (s.value / u.total < 0.0008) continue; // 画素にならない細片は描かない(合計の 0.08% 未満)
+        const seg = document.createElement('div');
+        seg.className = 'seg ' + s.cls;
+        seg.style.flex = `${s.value} 0 0`;
+        track.appendChild(seg);
+      }
+      attachTip(track, splitTipHTML(tipTitle || label, u, parts, tipExtra));
+    } else {
+      for (const s of SERIES) {
+        if (!u[s.key]) continue;
+        const seg = document.createElement('div');
+        seg.className = 'seg ' + s.cls;
+        seg.style.flex = `${u[s.key]} 0 0`;
+        track.appendChild(seg);
+      }
+      attachTip(track, usageTipHTML(tipTitle || label, u, tipExtra));
     }
-    attachTip(track, usageTipHTML(tipTitle || label, u, tipExtra));
     const val = document.createElement('div');
     val.className = 'val';
     val.textContent = fmt(u.total);
@@ -210,7 +293,11 @@
   // ---- sections -----------------------------------------------------------
   function renderLegend() {
     const html = SERIES.map((s) => `<span><i class="sw seg ${s.cls}"></i>${s.label}</span>`).join('');
-    $('legend').innerHTML = html;
+    const promptLegend = state.split ? splitLegendHTML() : html;
+    for (const id of ['legend', 'detailLegend']) {
+      $(id).innerHTML = promptLegend;
+      $(id).classList.toggle('split', state.split);
+    }
     $('modelLegend').innerHTML = html;
     $('trendLegend').innerHTML = html;
   }
@@ -250,7 +337,7 @@
     const swText = (p) => (p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回(${fmt(p.switchTokens)} 再作成)` : '');
     renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)} · API ${p.apiCalls} 回 · ${usd(p.cost)}${swText(p)}`, p.usage, max, p.text,
       `<div class="row"><span>概算コスト</span><span>${usd(p.cost)}</span></div><div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div><div class="row"><span>モデル切替</span><span>${full(p.modelSwitches || 0)} 回</span></div><div class="row"><span>セッション</span><span>${esc(p.sessionTitle || '')}</span></div>`,
-      () => openSession(p.sessionId))));
+      () => openSession(p.sessionId), p)));
     $('promptsTable').innerHTML = usageTable([{ label: '日時' }, { label: '指示' }, { label: 'プロジェクト' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols, { label: '概算 USD', num: true }],
       r.prompts.map((p) => [when(p.timestamp), p.text, projName(p.projectKey, p.cwd), full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage), usd(p.cost)]));
     const more = $('moreBtn');
@@ -363,20 +450,24 @@
   }
   async function openSession(id) {
     const s = await getJSON('/api/session?' + new URLSearchParams({ id }));
+    state.detailSession = s;
+    renderDetail(s);
+    $('tab-detail').hidden = false;
+    showTab('detail');
+  }
+  function renderDetail(s) {
     $('detailTitle').textContent = `セッション: ${s.title}`;
     const sw = s.breakdown ? s.breakdown.modelSwitches : { count: 0, tokens: 0 };
     $('detailSub').textContent = `${when(s.startedAt)} 〜 ${when(s.endedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · 合計 ${full(s.usage.total)} トークン · ${usd(s.cost)} · ${Object.keys(s.models).join(', ')}${sw.count ? ` · モデル切替 ${sw.count} 回(${fmt(sw.tokens)} 再作成)` : ''}`;
     const max = Math.max(0, ...s.promptList.map((p) => p.usage.total));
     renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, `${when(p.timestamp)} · API ${p.apiCalls} 回 · ツール ${p.toolUses} 回 · ${usd(p.cost)}${p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回` : ''}`, p.usage, max, p.text,
-      `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div>`)));
+      `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div>`, null, p)));
     const showModels = s.modelRows && s.modelRows.length > 0;
     $('detailModelsHead').hidden = !showModels;
     $('detailModelBars').hidden = !showModels;
     renderBars($('detailModelBars'), showModels ? modelBarRows(s.modelRows) : []);
     $('detailTable').innerHTML = usageTable([{ label: '#', num: true }, { label: '日時' }, { label: '指示' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols, { label: '概算 USD', num: true }],
       s.promptList.map((p) => [p.index + 1, when(p.timestamp), p.text, full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage), usd(p.cost)]));
-    $('tab-detail').hidden = false;
-    showTab('detail');
   }
 
   // ---- wiring -------------------------------------------------------------
@@ -415,6 +506,17 @@
   });
   for (const b of document.querySelectorAll('.topctl .group button')) b.addEventListener('click', () => applyDensity(b.dataset.density));
   for (const t of TABS) $('tab-' + t).addEventListener('click', () => showTab(t));
+  $('splitToggle').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-split]');
+    if (!b) return;
+    const on = b.dataset.split === '1';
+    if (state.split === on) return;
+    state.split = on;
+    setPressed('splitToggle', 'split', on ? '1' : '0');
+    renderLegend();
+    loadPrompts();
+    if (state.detailSession) renderDetail(state.detailSession);
+  });
   $('trendBucket').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-bucket]');
     if (!b || state.bucket === b.dataset.bucket) return;

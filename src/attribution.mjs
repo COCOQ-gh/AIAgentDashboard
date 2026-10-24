@@ -95,7 +95,9 @@ export function analyzeSession(session, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const b = emptyBreakdown();
   b.switches = []; // {timestamp, from, to, cacheCreation, promptIndex}
-  b.promptExtras = {}; // promptIndex -> {modelSwitches, switchTokens, creationByCause}
+  // promptIndex -> {modelSwitches, switchTokens, creation: {原因: トークン}, read: {構成: トークン}}
+  // creation / read は指示の棒を内訳タブと同じ分類で塗り分けるための値(主系列のみ。サブエージェント分は含まない)
+  b.promptExtras = {};
   const calls = orderedMainCalls(session);
   let prev = null;
   let ctxPrev = 0;
@@ -111,7 +113,8 @@ export function analyzeSession(session, opts = {}) {
       b.cacheRead += c.usage.cacheRead;
       b.creationByCause[cause].tokens += c.usage.cacheCreation;
       b.creationByCause[cause].calls++;
-      const pe = (b.promptExtras[c.promptIndex] ||= { modelSwitches: 0, switchTokens: 0 });
+      const pe = (b.promptExtras[c.promptIndex] ||= { modelSwitches: 0, switchTokens: 0, creation: {}, read: {} });
+      pe.creation[cause] = (pe.creation[cause] || 0) + c.usage.cacheCreation;
       if (cause === 'modelSwitch') {
         b.modelSwitches.count++;
         b.modelSwitches.tokens += c.usage.cacheCreation;
@@ -124,11 +127,13 @@ export function analyzeSession(session, opts = {}) {
         if (tot > 0) {
           for (const [k, v] of Object.entries(ledger)) {
             const share = c.usage.cacheRead * (v / tot);
+            pe.read[k] = (pe.read[k] || 0) + share;
             if (k.startsWith('tool:')) b.readByComponent.tools[k.slice(5)] = (b.readByComponent.tools[k.slice(5)] || 0) + share;
             else b.readByComponent[k] += share;
           }
         } else {
           b.readByComponent.baseline += c.usage.cacheRead; // 初回の読取(共有プレフィックス等)は初期コンテキスト扱い
+          pe.read.baseline = (pe.read.baseline || 0) + c.usage.cacheRead;
         }
       }
     }
@@ -158,6 +163,15 @@ export function analyzeSession(session, opts = {}) {
     }
     prev = c;
     ctxPrev = ctxNow;
+  }
+  // 表示用に整数へ丸め、0 の項目は落とす(API の応答サイズを抑える)
+  for (const pe of Object.values(b.promptExtras)) {
+    for (const m of [pe.creation, pe.read]) {
+      for (const k of Object.keys(m)) {
+        m[k] = Math.round(m[k]);
+        if (m[k] <= 0) delete m[k];
+      }
+    }
   }
   return b;
 }
