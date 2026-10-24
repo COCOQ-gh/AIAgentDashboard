@@ -16,6 +16,7 @@ import { emptyUsage, addUsage } from './parse.mjs';
 import { buildReport } from './report.mjs';
 import { analyzeSession, emptyBreakdown, addBreakdown, causeRows, componentRows } from './attribution.mjs';
 import { modelRows } from './models.mjs';
+import { PRICING_UPDATED } from './pricing.mjs';
 
 // セッションごとのキャッシュ内訳(since 無し)はセッションオブジェクトに紐づけてメモ化する(再走査で作り直される)
 const analysisCache = new WeakMap();
@@ -62,13 +63,15 @@ async function api(url, req, res) {
 
   if (url.pathname === '/api/overview') {
     const projects = summarizeProjects(sessions);
-    const totals = { sessions: sessions.length, prompts: 0, apiCalls: 0, usage: emptyUsage() };
+    const totals = { sessions: sessions.length, prompts: 0, apiCalls: 0, usage: emptyUsage(), cost: 0, unpricedCalls: 0 };
     for (const p of projects) {
       totals.prompts += p.prompts;
       totals.apiCalls += p.apiCalls;
       addUsage(totals.usage, p.usage);
+      totals.cost += p.cost;
+      totals.unpricedCalls += p.unpricedCalls;
     }
-    return json(res, 200, { projectsDir: store.projectsDir, scan: store.lastScan, totals, projects });
+    return json(res, 200, { projectsDir: store.projectsDir, scan: store.lastScan, pricing: { updated: PRICING_UPDATED }, totals, projects });
   }
   if (url.pathname === '/api/prompts') {
     const limit = Math.min(Number(url.searchParams.get('limit') || 50), 1000);
@@ -105,7 +108,7 @@ async function api(url, req, res) {
     // モデル別の内訳(project・since で絞る)。call 単位で集計する(src/models.mjs)
     const since = url.searchParams.get('since') || '';
     const rows = modelRows(filterByProject(sessions, project), { since });
-    return json(res, 200, { models: rows });
+    return json(res, 200, { pricing: { updated: PRICING_UPDATED }, models: rows });
   }
   if (url.pathname === '/api/report') {
     // AI エージェント向け: 1 セッションの消費・コンテキスト推定・ツール別の文脈追加・提案(src/report.mjs)

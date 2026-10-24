@@ -9,6 +9,8 @@
 //     最初の呼出(指示本文 + 注入されたシステム文脈)は '(指示+システム)' に計上する
 
 import { analyzeSession, causeRows, componentRows } from './attribution.mjs';
+import { modelRows } from './models.mjs';
+import { PRICING_UPDATED, formatUsd } from './pricing.mjs';
 
 export function projectKeyFromCwd(cwd) {
   return String(cwd).replace(/[^A-Za-z0-9]/g, '-');
@@ -114,9 +116,13 @@ export function buildReport(session, opts = {}) {
       apiCalls: session.apiCalls,
       toolUses: session.prompts.reduce((n, p) => n + p.toolUses, 0),
       usage: session.usage,
+      cost: session.cost || 0,
+      unpricedCalls: session.unpricedCalls || 0,
+      pricingUpdated: PRICING_UPDATED,
       sidechainTokens,
       models: session.models,
     },
+    modelRows: modelRows([session]),
     context: { lastTokens, windowTokens, pct: windowTokens ? Math.round((lastTokens / windowTokens) * 100) : null, model, estimated: true },
     prompts: rows,
     top: [...rows].sort((a, b) => b.usage.total - a.usage.total).slice(0, top),
@@ -195,6 +201,7 @@ export function renderMarkdown(r) {
   out.push(`- cwd: ${s.cwd || '-'} / 期間: ${s.startedAt || '-'} → ${s.endedAt || '-'}`);
   out.push(`- 指示 ${s.prompts} 件 / API 呼出 ${s.apiCalls} 回 / ツール呼出 ${s.toolUses} 回 / モデル: ${Object.keys(s.models).join(', ') || '-'}`);
   out.push(`- 合計 ${fmt(u.total)} トークン(入力 ${fmt(u.input)} / キャッシュ作成 ${fmt(u.cacheCreation)} / キャッシュ読取 ${fmt(u.cacheRead)} / 出力 ${fmt(u.output)})${s.sidechainTokens ? ` うちサブエージェント ${fmt(s.sidechainTokens)}` : ''}`);
+  out.push(`- 概算コスト ${formatUsd(s.cost)}(単価 ${s.pricingUpdated} 時点の API 従量価格での概算${s.unpricedCalls ? `。単価未登録のモデル ${s.unpricedCalls} 回は除外` : ''})`);
   out.push(`- 現在のコンテキスト(推定): ${fmt(r.context.lastTokens)} / ${fmt(r.context.windowTokens)} トークン(${r.context.pct ?? '-'}%)`);
   out.push('');
   out.push('## 提案');
@@ -205,6 +212,13 @@ export function renderMarkdown(r) {
   out.push('|---|---|---|---|---|---|---|---|');
   for (const p of r.top) out.push(`| ${p.index} | ${hhmm(p.timestamp)} | ${cell(p.text.slice(0, 60))} | ${p.apiCalls} | ${p.toolUses} | ${fmt(p.usage.total)} | ${fmt(p.usage.output)} | ${fmt(p.contextEnd)} |`);
   out.push('');
+  if (r.modelRows && r.modelRows.length) {
+    out.push('## モデル別');
+    out.push('| モデル | API | 合計 | 出力 | 概算 USD |');
+    out.push('|---|---|---|---|---|');
+    for (const m of r.modelRows) out.push(`| ${cell(m.model)} | ${m.calls} | ${fmt(m.usage.total)} | ${fmt(m.usage.output)} | ${m.unpricedCalls ? '単価未登録' : formatUsd(m.cost)} |`);
+    out.push('');
+  }
   out.push('## ツール別の文脈追加(概算)');
   const added = r.tools.reduce((n, t) => n + t.addedTokens, 0);
   out.push('| ツール | 回数 | 追加トークン | 比率 |');
@@ -243,12 +257,12 @@ export function renderMarkdown(r) {
 export function listRows(sessions) {
   return sessions
     .filter((s) => !s.parentSessionId)
-    .map((s) => ({ sessionId: s.sessionId, title: s.title, startedAt: s.startedAt, endedAt: s.endedAt, prompts: s.prompts.length, apiCalls: s.apiCalls, total: s.usage.total, output: s.usage.output }))
+    .map((s) => ({ sessionId: s.sessionId, title: s.title, startedAt: s.startedAt, endedAt: s.endedAt, prompts: s.prompts.length, apiCalls: s.apiCalls, total: s.usage.total, output: s.usage.output, cost: s.cost || 0 }))
     .sort((a, b) => ((a.endedAt || '') > (b.endedAt || '') ? -1 : (a.endedAt || '') < (b.endedAt || '') ? 1 : 0));
 }
 
 export function renderListMarkdown(rows, projectKey) {
-  const out = [`# セッション一覧: ${projectKey || '(全プロジェクト)'}(${rows.length} 件・新しい順)`, '', '| 最終更新 | セッション | 指示 | API | 合計 | 出力 | 題名 |', '|---|---|---|---|---|---|---|'];
-  for (const r of rows) out.push(`| ${(r.endedAt || '-').slice(0, 16)} | ${r.sessionId} | ${r.prompts} | ${r.apiCalls} | ${fmt(r.total)} | ${fmt(r.output)} | ${cell(String(r.title || '').slice(0, 40))} |`);
+  const out = [`# セッション一覧: ${projectKey || '(全プロジェクト)'}(${rows.length} 件・新しい順)`, '', '| 最終更新 | セッション | 指示 | API | 合計 | 出力 | 概算 USD | 題名 |', '|---|---|---|---|---|---|---|---|'];
+  for (const r of rows) out.push(`| ${(r.endedAt || '-').slice(0, 16)} | ${r.sessionId} | ${r.prompts} | ${r.apiCalls} | ${fmt(r.total)} | ${fmt(r.output)} | ${formatUsd(r.cost)} | ${cell(String(r.title || '').slice(0, 40))} |`);
   return out.join('\n');
 }

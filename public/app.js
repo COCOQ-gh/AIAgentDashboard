@@ -26,6 +26,8 @@
   const full = (n) => (n == null ? '–' : n.toLocaleString('ja-JP'));
   const when = (iso) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
   const day = (iso) => (iso ? new Date(iso).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '');
+  // USD 概算の表示(src/pricing.mjs の formatUsd と同じ刻み)
+  const usd = (x) => (x >= 100 ? '$' + Math.round(x).toLocaleString('en-US') : x >= 1 ? '$' + x.toFixed(2) : x > 0 ? '$' + x.toFixed(3) : '$0');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const projName = (key, cwd) => (cwd ? cwd.replace(/\\/g, '/').split('/').filter(Boolean).slice(-2).join('/') : key);
 
@@ -211,6 +213,11 @@
     $('legend').innerHTML = html;
     $('modelLegend').innerHTML = html;
   }
+  // 単価テーブルの更新日と、単価未登録のモデルがあればその呼出数
+  function costNote(unpriced) {
+    const upd = state.overview && state.overview.pricing ? state.overview.pricing.updated : '';
+    return `単価 ${upd} 時点の概算` + (unpriced ? ` · 単価未登録 ${full(unpriced)} 回は除外` : '');
+  }
   function renderKpis(totals, promptsShown, scopeLabel) {
     const u = totals.usage;
     const items = [
@@ -218,6 +225,7 @@
       ['出力トークン', fmt(u.output), '応答として生成された分'],
       ['キャッシュ読取', fmt(u.cacheRead), (u.total ? Math.round((u.cacheRead / u.total) * 100) : 0) + '% が再利用'],
       ['キャッシュ作成', fmt(u.cacheCreation), '文脈を積み直した分'],
+      ['概算コスト', usd(totals.cost || 0), costNote(totals.unpricedCalls)],
       ['指示', full(totals.prompts), promptsShown != null ? `条件に合う ${full(promptsShown)} 件` : ''],
       ['セッション', full(totals.sessions), ''],
     ];
@@ -239,11 +247,11 @@
     const r = await getJSON('/api/prompts?' + q);
     const max = Math.max(0, ...r.prompts.map((p) => p.usage.total));
     const swText = (p) => (p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回(${fmt(p.switchTokens)} 再作成)` : '');
-    renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)} · API ${p.apiCalls} 回${swText(p)}`, p.usage, max, p.text,
-      `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div><div class="row"><span>モデル切替</span><span>${full(p.modelSwitches || 0)} 回</span></div><div class="row"><span>セッション</span><span>${esc(p.sessionTitle || '')}</span></div>`,
+    renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)} · API ${p.apiCalls} 回 · ${usd(p.cost)}${swText(p)}`, p.usage, max, p.text,
+      `<div class="row"><span>概算コスト</span><span>${usd(p.cost)}</span></div><div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div><div class="row"><span>モデル切替</span><span>${full(p.modelSwitches || 0)} 回</span></div><div class="row"><span>セッション</span><span>${esc(p.sessionTitle || '')}</span></div>`,
       () => openSession(p.sessionId))));
-    $('promptsTable').innerHTML = usageTable([{ label: '日時' }, { label: '指示' }, { label: 'プロジェクト' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
-      r.prompts.map((p) => [when(p.timestamp), p.text, projName(p.projectKey, p.cwd), full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
+    $('promptsTable').innerHTML = usageTable([{ label: '日時' }, { label: '指示' }, { label: 'プロジェクト' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols, { label: '概算 USD', num: true }],
+      r.prompts.map((p) => [when(p.timestamp), p.text, projName(p.projectKey, p.cwd), full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage), usd(p.cost)]));
     const more = $('moreBtn');
     more.hidden = r.count <= r.prompts.length;
     more.textContent = `もっと見る(${full(r.prompts.length)} / ${full(r.count)} 件)`;
@@ -268,11 +276,11 @@
   const pctText = (x) => (x >= 0.995 ? '100%' : x >= 0.1 ? Math.round(x * 100) + '%' : (x * 100).toFixed(1) + '%');
   function modelBarRows(rows) {
     const max = Math.max(0, ...rows.map((r) => r.usage.total));
-    return rows.map((r) => stackedRow(r.model, `${pctText(r.share)} · API ${full(r.calls)} 回 · ${full(r.sessions)} セッション · ${day(r.firstAt)}〜${day(r.lastAt)}`, r.usage, max, r.model,
-      `<div class="row"><span>API 応答</span><span>${full(r.calls)}</span></div><div class="row"><span>セッション</span><span>${full(r.sessions)}</span></div><div class="row"><span>全体に占める比率</span><span>${pctText(r.share)}</span></div>`));
+    return rows.map((r) => stackedRow(r.model, `${pctText(r.share)} · ${r.unpricedCalls ? '単価未登録' : usd(r.cost)} · API ${full(r.calls)} 回 · ${full(r.sessions)} セッション · ${day(r.firstAt)}〜${day(r.lastAt)}`, r.usage, max, r.model,
+      `<div class="row"><span>概算コスト</span><span>${r.unpricedCalls ? '単価未登録' : usd(r.cost)}</span></div><div class="row"><span>API 応答</span><span>${full(r.calls)}</span></div><div class="row"><span>セッション</span><span>${full(r.sessions)}</span></div><div class="row"><span>全体に占める比率</span><span>${pctText(r.share)}</span></div>`));
   }
-  const modelCols = [{ label: 'モデル' }, { label: '比率', num: true }, { label: 'API', num: true }, { label: 'セッション', num: true }, ...usageCols];
-  const modelCells = (r) => [r.model, pctText(r.share), full(r.calls), full(r.sessions), ...usageCells(r.usage)];
+  const modelCols = [{ label: 'モデル' }, { label: '比率', num: true }, { label: 'API', num: true }, { label: 'セッション', num: true }, ...usageCols, { label: '概算 USD', num: true }];
+  const modelCells = (r) => [r.model, pctText(r.share), full(r.calls), full(r.sessions), ...usageCells(r.usage), r.unpricedCalls ? '未登録' : usd(r.cost)];
   async function loadModels() {
     const r = await getJSON('/api/models?' + new URLSearchParams({ project: state.project, since: sinceISO() }));
     renderBars($('modelBars'), modelBarRows(r.models));
@@ -286,7 +294,7 @@
     for (const s of r.sessions) {
       const el = document.createElement('div');
       el.className = 'sess';
-      el.innerHTML = `<div class="t">${esc(s.title)}</div><div class="n">${fmt(s.usage.total)}</div><div class="d">${when(s.startedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件${s.error ? ' · 読込エラー' : ''}</div>`;
+      el.innerHTML = `<div class="t">${esc(s.title)}</div><div class="n">${fmt(s.usage.total)}</div><div class="d">${when(s.startedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · ${usd(s.cost)}${s.error ? ' · 読込エラー' : ''}</div>`;
       el.addEventListener('click', () => openSession(s.sessionId));
       list.appendChild(el);
     }
@@ -295,16 +303,16 @@
     const s = await getJSON('/api/session?' + new URLSearchParams({ id }));
     $('detailTitle').textContent = `セッション: ${s.title}`;
     const sw = s.breakdown ? s.breakdown.modelSwitches : { count: 0, tokens: 0 };
-    $('detailSub').textContent = `${when(s.startedAt)} 〜 ${when(s.endedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · 合計 ${full(s.usage.total)} トークン · ${Object.keys(s.models).join(', ')}${sw.count ? ` · モデル切替 ${sw.count} 回(${fmt(sw.tokens)} 再作成)` : ''}`;
+    $('detailSub').textContent = `${when(s.startedAt)} 〜 ${when(s.endedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · 合計 ${full(s.usage.total)} トークン · ${usd(s.cost)} · ${Object.keys(s.models).join(', ')}${sw.count ? ` · モデル切替 ${sw.count} 回(${fmt(sw.tokens)} 再作成)` : ''}`;
     const max = Math.max(0, ...s.promptList.map((p) => p.usage.total));
-    renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, `${when(p.timestamp)} · API ${p.apiCalls} 回 · ツール ${p.toolUses} 回${p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回` : ''}`, p.usage, max, p.text,
+    renderBars($('detailBars'), s.promptList.map((p) => stackedRow(`${p.index + 1}. ${p.text || '(空の指示)'}`, `${when(p.timestamp)} · API ${p.apiCalls} 回 · ツール ${p.toolUses} 回 · ${usd(p.cost)}${p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回` : ''}`, p.usage, max, p.text,
       `<div class="row"><span>API 応答</span><span>${full(p.apiCalls)}</span></div><div class="row"><span>ツール呼出</span><span>${full(p.toolUses)}</span></div>`)));
     const showModels = s.modelRows && s.modelRows.length > 0;
     $('detailModelsHead').hidden = !showModels;
     $('detailModelBars').hidden = !showModels;
     renderBars($('detailModelBars'), showModels ? modelBarRows(s.modelRows) : []);
-    $('detailTable').innerHTML = usageTable([{ label: '#', num: true }, { label: '日時' }, { label: '指示' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols],
-      s.promptList.map((p) => [p.index + 1, when(p.timestamp), p.text, full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage)]));
+    $('detailTable').innerHTML = usageTable([{ label: '#', num: true }, { label: '日時' }, { label: '指示' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols, { label: '概算 USD', num: true }],
+      s.promptList.map((p) => [p.index + 1, when(p.timestamp), p.text, full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage), usd(p.cost)]));
     $('tab-detail').hidden = false;
     showTab('detail');
   }
@@ -320,7 +328,7 @@
       const [, r] = await Promise.all([loadSessions(), loadPrompts(), loadBreakdown(), loadModels()]);
       const o = state.overview;
       const proj = state.project ? o.projects.find((x) => x.key === state.project) : null;
-      const totals = proj ? { sessions: proj.sessions, prompts: proj.prompts, apiCalls: proj.apiCalls, usage: proj.usage } : o.totals;
+      const totals = proj ? { sessions: proj.sessions, prompts: proj.prompts, apiCalls: proj.apiCalls, usage: proj.usage, cost: proj.cost, unpricedCalls: proj.unpricedCalls } : o.totals;
       renderKpis(totals, r.count, proj ? projName(proj.key, proj.cwd) : '');
     } finally {
       document.body.style.opacity = '';

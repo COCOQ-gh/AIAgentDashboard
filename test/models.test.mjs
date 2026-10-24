@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { modelRows, normalizeModel, isSyntheticModel } from '../src/models.mjs';
 
-const u = (input, cc, cr, output) => ({ input, cacheCreation: cc, cacheRead: cr, output, total: input + cc + cr + output });
+const u = (input, cc, cr, output) => ({ input, cacheCreation: cc, cacheCreation1h: 0, cacheRead: cr, output, total: input + cc + cr + output });
 const t = (day) => new Date(Date.UTC(2026, 9, day, 0, 0, 0)).toISOString();
 const call = (model, day, usage) => ({ id: Math.random().toString(36), model, timestamp: day == null ? null : t(day), usage });
 const session = (...calls) => ({ prompts: [{ index: 0, calls }] });
@@ -24,12 +24,15 @@ test('モデル別: call ごとにモデルへ足し、日付サフィックス�
   assert.equal(opus.firstAt, t(1));
   assert.equal(opus.lastAt, t(3));
   assert.ok(Math.abs(rows.reduce((n, r) => n + r.share, 0) - 1) < 1e-9, '比率の合計は 1');
+  assert.ok(opus.cost > 0 && haiku.cost > 0, '単価登録済みのモデルはコストが付く');
+  assert.equal(opus.unpricedCalls, 0);
 });
 
 test('モデル別: <synthetic> は出さず、since は call のタイムスタンプで絞る', () => {
   const s = session(call('<synthetic>', 1, u(0, 0, 0, 0)), call('m1', 1, u(1, 0, 0, 1)), call('m1', 5, u(5, 0, 0, 5)), call('m2', null, u(9, 0, 0, 9)));
   const all = modelRows([s]);
   assert.deepEqual(all.map((r) => r.model).sort(), ['m1', 'm2']);
+  assert.ok(all.every((r) => r.cost === 0 && r.unpricedCalls > 0), '単価未登録のモデルは 0 円で件数だけ数える');
   const recent = modelRows([s], { since: t(3) });
   assert.deepEqual(recent.map((r) => r.model), ['m1']);
   assert.equal(recent[0].usage.total, 10);

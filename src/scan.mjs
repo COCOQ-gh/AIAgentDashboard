@@ -276,7 +276,7 @@ export function summarizeProjects(sessions) {
   for (const s of sessions) {
     let p = byKey.get(s.projectKey);
     if (!p) {
-      p = { key: s.projectKey, cwd: null, sessions: 0, prompts: 0, apiCalls: 0, usage: emptyUsage(), firstActivity: null, lastActivity: null, models: {} };
+      p = { key: s.projectKey, cwd: null, sessions: 0, prompts: 0, apiCalls: 0, usage: emptyUsage(), cost: 0, unpricedCalls: 0, firstActivity: null, lastActivity: null, models: {} };
       byKey.set(s.projectKey, p);
     }
     if (s.cwd && !p.cwd) p.cwd = s.cwd;
@@ -284,6 +284,8 @@ export function summarizeProjects(sessions) {
     p.prompts += s.prompts.length;
     p.apiCalls += s.apiCalls;
     addUsage(p.usage, s.usage);
+    p.cost += s.cost || 0;
+    p.unpricedCalls += s.unpricedCalls || 0;
     if (s.startedAt && (!p.firstActivity || s.startedAt < p.firstActivity)) p.firstActivity = s.startedAt;
     if (s.endedAt && (!p.lastActivity || s.endedAt > p.lastActivity)) p.lastActivity = s.endedAt;
     for (const [m, c] of Object.entries(s.models)) p.models[m] = (p.models[m] || 0) + c;
@@ -303,6 +305,8 @@ export function sessionSummary(s) {
     duplicatePrompts: s.duplicatePrompts || 0,
     apiCalls: s.apiCalls,
     usage: s.usage,
+    cost: s.cost || 0,
+    unpricedCalls: s.unpricedCalls || 0,
     models: s.models,
     fileSize: s.fileSize,
     error: s.error || null,

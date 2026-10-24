@@ -51,10 +51,10 @@ test('usage は message.id で重複排除され、直前の人間プロンプ�
   assert.equal(s.prompts.length, 2);
   const [p1, p2] = s.prompts;
   assert.equal(p1.text, '最初の指示');
-  assert.deepEqual(p1.usage, { input: 3, cacheCreation: 100, cacheRead: 3000, output: 60, total: 3163 });
+  assert.deepEqual(p1.usage, { input: 3, cacheCreation: 100, cacheCreation1h: 0, cacheRead: 3000, output: 60, total: 3163 });
   assert.equal(p1.apiCalls, 2);
   assert.equal(p1.toolUses, 2);
-  assert.deepEqual(p2.usage, { input: 5, cacheCreation: 7, cacheRead: 9, output: 11, total: 32 });
+  assert.deepEqual(p2.usage, { input: 5, cacheCreation: 7, cacheCreation1h: 0, cacheRead: 9, output: 11, total: 32 });
   assert.equal(s.usage.total, 3163 + 32);
   assert.equal(s.apiCalls, 3);
   assert.equal(s.sessionId, 'S1');

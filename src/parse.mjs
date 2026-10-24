@@ -10,13 +10,17 @@
 // 「直前のプロンプト」に帰属させる。各プロンプトは API 呼出の一覧(calls)を保持し、
 // 複数ファイル横断の重複排除(フォーク複製・サブエージェント合流)は scan.mjs が行う。
 
+// cacheCreation1h は cacheCreation のうち 1 時間 TTL で書いた分(残りは 5 分)。単価が違うので USD 概算に要る。total には足さない
+import { callCost } from './pricing.mjs';
+
 export function emptyUsage() {
-  return { input: 0, cacheCreation: 0, cacheRead: 0, output: 0, total: 0 };
+  return { input: 0, cacheCreation: 0, cacheCreation1h: 0, cacheRead: 0, output: 0, total: 0 };
 }
 
 export function addUsage(target, u) {
   target.input += u.input;
   target.cacheCreation += u.cacheCreation;
+  target.cacheCreation1h += u.cacheCreation1h || 0;
   target.cacheRead += u.cacheRead;
   target.output += u.output;
   target.total += u.total;
@@ -28,11 +32,14 @@ function usageFromMessage(usage) {
   const u = {
     input: n(usage.input_tokens),
     cacheCreation: n(usage.cache_creation_input_tokens),
+    cacheCreation1h: 0,
     cacheRead: n(usage.cache_read_input_tokens),
     output: n(usage.output_tokens),
     total: 0,
   };
   u.total = u.input + u.cacheCreation + u.cacheRead + u.output;
+  // TTL 別の内訳が無い旧形式は 5 分扱い(1h=0)。内訳の合計が cacheCreation を超える壊れた行は cacheCreation に丸める
+  u.cacheCreation1h = Math.min(n(usage.cache_creation && usage.cache_creation.ephemeral_1h_input_tokens), u.cacheCreation);
   return u;
 }
 
@@ -99,6 +106,8 @@ export function newPrompt(rec, index, kind) {
     rawLength: raw.length,
     calls: [], // {id, usage, model, toolUses, tools: [name], sidechain, timestamp}
     usage: emptyUsage(),
+    cost: 0,
+    unpricedCalls: 0,
     apiCalls: 0,
     toolUses: 0,
     sidechainCalls: 0,
@@ -109,12 +118,17 @@ export function newPrompt(rec, index, kind) {
 /** calls から集計フィールドを計算し直す(scan の重複排除後にも使う)。 */
 export function recomputePrompt(p) {
   p.usage = emptyUsage();
+  p.cost = 0;
+  p.unpricedCalls = 0;
   p.apiCalls = 0;
   p.toolUses = 0;
   p.sidechainCalls = 0;
   p.models = {};
   for (const c of p.calls) {
     addUsage(p.usage, c.usage);
+    const cc = callCost(c.model, c.usage);
+    p.cost += cc.usd;
+    if (!cc.priced) p.unpricedCalls++;
     p.apiCalls++;
     p.toolUses += c.toolUses;
     if (c.sidechain) p.sidechainCalls++;
@@ -126,11 +140,15 @@ export function recomputePrompt(p) {
 
 export function recomputeSession(s) {
   s.usage = emptyUsage();
+  s.cost = 0;
+  s.unpricedCalls = 0;
   s.apiCalls = 0;
   s.models = {};
   for (const p of s.prompts) {
     recomputePrompt(p);
     addUsage(s.usage, p.usage);
+    s.cost += p.cost;
+    s.unpricedCalls += p.unpricedCalls;
     s.apiCalls += p.apiCalls;
     for (const [m, c] of Object.entries(p.models)) s.models[m] = (s.models[m] || 0) + c;
   }
@@ -151,6 +169,8 @@ export function parseTranscript(text, opts = {}) {
     endedAt: null,
     prompts: [],
     usage: emptyUsage(),
+    cost: 0,
+    unpricedCalls: 0,
     apiCalls: 0,
     models: {},
     badLines: 0,
