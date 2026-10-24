@@ -58,6 +58,7 @@
 
     <nav class="tabs" role="tablist" aria-label="表示の切替">
       <button role="tab" type="button" id="tab-prompts" aria-controls="pane-prompts" aria-selected="true">指示</button>
+      <button role="tab" type="button" id="tab-trend" aria-controls="pane-trend" aria-selected="false">推移</button>
       <button role="tab" type="button" id="tab-breakdown" aria-controls="pane-breakdown" aria-selected="false">キャッシュ内訳</button>
       <button role="tab" type="button" id="tab-models" aria-controls="pane-models" aria-selected="false">モデル</button>
       <button role="tab" type="button" id="tab-sessions" aria-controls="pane-sessions" aria-selected="false">セッション</button>
@@ -88,6 +89,24 @@
         <div class="bars" id="promptBars"></div>
         <div class="tableview" id="promptsTable" hidden></div>
         <div class="more"><button type="button" id="moreBtn" hidden>もっと見る</button></div>
+      </section>
+
+      <section class="pane" role="tabpanel" id="pane-trend" aria-labelledby="tab-trend" hidden>
+        <div class="pane-bar">
+          <div class="group" role="group" aria-label="集計の単位" id="trendBucket">
+            <button type="button" data-bucket="day" aria-pressed="true">日別</button>
+            <button type="button" data-bucket="week" aria-pressed="false">週別</button>
+          </div>
+          <div class="group" role="group" aria-label="指標" id="trendMetric">
+            <button type="button" data-metric="tokens" aria-pressed="true">トークン</button>
+            <button type="button" data-metric="usd" aria-pressed="false">概算 USD</button>
+          </div>
+          <div class="legend" id="trendLegend"></div>
+          <button type="button" class="toggle" data-target="trendTable">表で見る</button>
+        </div>
+        <p class="pane-note" id="trendSub">API 応答(call)のタイムスタンプで振り分け。日の区切りはこのブラウザのローカル時刻、週は月曜始まり。</p>
+        <div class="ts-wrap" id="trendChart"></div>
+        <div class="tableview" id="trendTable" hidden></div>
       </section>
 
       <section class="pane two" role="tabpanel" id="pane-breakdown" aria-labelledby="tab-breakdown" hidden>

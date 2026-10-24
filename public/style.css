@@ -158,6 +158,18 @@ main { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 
 .pane-bar { position: sticky; top: 0; z-index: 2; background: var(--page); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 12px 0 10px; }
 .pane-bar label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--ink-2); }
 .pane-bar .cap-title { flex: 0 1 auto; }
+/* 推移(時系列の積み上げ縦棒) */
+.ts-wrap { margin-top: 4px; }
+.ts-cap { display: flex; justify-content: space-between; font-size: var(--fs-small); color: var(--ink-2); margin-bottom: 4px; }
+.ts { display: flex; align-items: stretch; gap: 2px; height: 240px; border-bottom: 1px solid var(--grid); background: linear-gradient(to bottom, var(--grid) 1px, transparent 1px) 0 0 / 100% 25%; }
+.ts .tcol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; cursor: default; }
+.ts .tbar { display: flex; flex-direction: column-reverse; min-height: 0; }
+.ts .tbar .seg { width: 100%; min-height: 0; }
+.ts .tcol:hover .tbar { filter: brightness(1.12); }
+.ts .tcol:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.seg.cost { background: var(--s-single); }
+.ts-axis { display: flex; gap: 2px; font-size: var(--fs-small); color: var(--muted); overflow: hidden; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.ts-axis span { flex: 1 1 0; min-width: 0; white-space: nowrap; }
 .pane-sub { margin: 14px 0 6px; font-weight: 600; font-size: var(--fs-sub); color: var(--ink-2); }
 .pane-note { margin: 0 0 12px; color: var(--ink-2); font-size: var(--fs-sub); }
 .pane > .pane-note:first-child { margin-top: 14px; }

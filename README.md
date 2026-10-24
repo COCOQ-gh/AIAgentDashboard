@@ -35,6 +35,8 @@ npm start
   指示・モデル・セッション・セッション詳細の各行にも概算 USD を出す(表ビューには「概算 USD」列)
 - **タブ「指示」** — トークン消費の多い指示。1 本 = 人間の 1 指示。積み上げ色はキャッシュ読取・キャッシュ作成・入力・出力。
   並び順・件数の選択と、20 件ずつの「もっと見る」
+- **タブ「推移」** — 日別 / 週別の積み上げ縦棒(トークンは 4 系列、「概算 USD」に切り替え可)。API 応答(call)のタイムスタンプで
+  振り分け、日の区切りは**ブラウザのローカル時刻**、週は月曜始まり。使っていない日・週も 0 として並べる。期間フィルタとサイドバーのプロジェクトで絞る
 - **タブ「キャッシュ内訳」**
   - **キャッシュ作成の原因** — 初回 / モデル切替 / アイドル後(60 分超・5〜60 分)/ 圧縮 / 通常の追加。
     モデル切替・長いアイドル・圧縮は「同じ文脈の作り直し」で、指示ごとの行にも切替回数と再作成量を出す
@@ -89,6 +91,7 @@ API 応答(call)ごとに、モデル別の単価で `入力 + 出力 + キャ�
 | `GET /api/report?session=&top=` | AI エージェント向けレポート(下記 CLI と同じ JSON) |
 | `GET /api/breakdown?project=&since=` | キャッシュ作成の原因とキャッシュ読取の構成(src/attribution.mjs) |
 | `GET /api/models?project=&since=` | モデル別の内訳(src/models.mjs)。`/api/session` にも `modelRows` を付与 |
+| `GET /api/timeseries?project=&since=&bucket=day|week&tz=` | 日別 / 週別の推移(src/timeseries.mjs)。`tz` は UTC との差(分。ブラウザの `getTimezoneOffset`)、省略は UTC |
 
 `cost`(USD 概算)は `/api/overview`・`/api/prompts`・`/api/sessions`・`/api/session`・`/api/models`・`/api/report` の各行に付く。
 | `POST /api/rescan` | 再走査 |

@@ -10,10 +10,10 @@
     { key: 'output', label: '出力', cls: 'output' },
   ];
   const PAGE = 20; // 「もっと見る」1 回で増える件数
-  const TABS = ['prompts', 'breakdown', 'models', 'sessions', 'detail'];
+  const TABS = ['prompts', 'trend', 'breakdown', 'models', 'sessions', 'detail'];
   const state = {
     project: '', sinceDays: '', sort: 'total', limit: PAGE, extra: 0, overview: null,
-    projQuery: '', projSort: 'total', tab: 'prompts', prevTab: 'prompts',
+    projQuery: '', projSort: 'total', tab: 'prompts', prevTab: 'prompts', bucket: 'day', metric: 'tokens', trend: null,
   };
 
   const fmt = (n) => {
@@ -212,6 +212,7 @@
     const html = SERIES.map((s) => `<span><i class="sw seg ${s.cls}"></i>${s.label}</span>`).join('');
     $('legend').innerHTML = html;
     $('modelLegend').innerHTML = html;
+    $('trendLegend').innerHTML = html;
   }
   // 単価テーブルの更新日と、単価未登録のモデルがあればその呼出数
   function costNote(unpriced) {
@@ -287,6 +288,67 @@
     $('modelsTable').innerHTML = usageTable(modelCols, r.models.map(modelCells));
     return r;
   }
+  // ---- 推移(日別 / 週別の積み上げ縦棒) ------------------------------------
+  const md = (key) => { const [, m, d] = key.split('-'); return Number(m) + '/' + Number(d); };
+  const bucketLabel = (key) => md(key) + (state.bucket === 'week' ? ' 週' : '');
+  function renderTrend() {
+    const t = state.trend;
+    if (!t) return;
+    const usdMode = state.metric === 'usd';
+    const val = (r) => (usdMode ? r.cost : r.usage.total);
+    const show = (n) => (usdMode ? usd(n) : fmt(n));
+    const chart = $('trendChart');
+    $('trendLegend').innerHTML = usdMode ? '<span><i class="sw seg cost"></i>概算 USD</span>' : SERIES.map((s) => `<span><i class="sw seg ${s.cls}"></i>${s.label}</span>`).join('');
+    if (!t.rows.length) { chart.innerHTML = '<div class="empty">データがありません</div>'; $('trendTable').innerHTML = ''; return; }
+    const max = Math.max(0, ...t.rows.map(val));
+    const unit = state.bucket === 'week' ? '週' : '日';
+    const total = t.rows.reduce((n, r) => n + val(r), 0);
+    chart.innerHTML = `<div class="ts-cap"><span>1${unit}あたり最大 ${show(max)}</span><span>${t.rows.length} ${unit}・合計 ${show(total)}</span></div><div class="ts"></div><div class="ts-axis"></div>`;
+    const ts = chart.querySelector('.ts');
+    const axis = chart.querySelector('.ts-axis');
+    const every = Math.max(1, Math.ceil(t.rows.length / 10));
+    t.rows.forEach((r, i) => {
+      const col = document.createElement('div');
+      col.className = 'tcol';
+      const bar = document.createElement('div');
+      bar.className = 'tbar';
+      const h = max > 0 ? (val(r) / max) * 100 : 0;
+      bar.style.height = (val(r) > 0 ? Math.max(h, 0.8) : 0) + '%';
+      if (usdMode) {
+        const seg = document.createElement('div');
+        seg.className = 'seg cost';
+        seg.style.flex = '1 1 0';
+        bar.appendChild(seg);
+      } else {
+        for (const s of SERIES) {
+          if (!r.usage[s.key]) continue;
+          const seg = document.createElement('div');
+          seg.className = 'seg ' + s.cls;
+          seg.style.flex = `${r.usage[s.key]} 0 0`;
+          bar.appendChild(seg);
+        }
+      }
+      col.appendChild(bar);
+      const cost = r.unpricedCalls ? `${usd(r.cost)}(未登録 ${r.unpricedCalls} 回を除く)` : usd(r.cost);
+      attachTip(col, usageTipHTML(bucketLabel(r.key) + (state.bucket === 'week' ? '(月曜始まり)' : ''), r.usage,
+        `<div class="row"><span>概算コスト</span><span>${cost}</span></div><div class="row"><span>API 応答</span><span>${full(r.calls)}</span></div>`));
+      ts.appendChild(col);
+      const lab = document.createElement('span');
+      lab.textContent = i % every === 0 && t.rows.length - i > every / 2 ? md(r.key) : '';
+      axis.appendChild(lab);
+    });
+    $('trendTable').innerHTML = usageTable([{ label: state.bucket === 'week' ? '週(月曜)' : '日' }, { label: 'API', num: true }, ...usageCols, { label: '概算 USD', num: true }],
+      t.rows.map((r) => [r.key, full(r.calls), ...usageCells(r.usage), usd(r.cost)]));
+    $('trendSub').textContent = `API 応答(call)のタイムスタンプで振り分け。日の区切りはこのブラウザのローカル時刻、週は月曜始まり。${usdMode ? '単価は ' + t.pricing.updated + ' 時点の概算。' : ''}`;
+  }
+  async function loadTrend() {
+    const q = new URLSearchParams({ project: state.project, since: sinceISO(), bucket: state.bucket, tz: String(new Date().getTimezoneOffset()) });
+    state.trend = await getJSON('/api/timeseries?' + q);
+    renderTrend();
+  }
+  function setPressed(groupId, attr, value) {
+    for (const b of $(groupId).querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset[attr] === value));
+  }
   async function loadSessions() {
     const r = await getJSON('/api/sessions?' + new URLSearchParams({ project: state.project }));
     const list = $('sessionList');
@@ -325,7 +387,7 @@
     if (!keepExtra) state.extra = 0;
     document.body.style.opacity = '0.85';
     try {
-      const [, r] = await Promise.all([loadSessions(), loadPrompts(), loadBreakdown(), loadModels()]);
+      const [, r] = await Promise.all([loadSessions(), loadPrompts(), loadBreakdown(), loadModels(), loadTrend()]);
       const o = state.overview;
       const proj = state.project ? o.projects.find((x) => x.key === state.project) : null;
       const totals = proj ? { sessions: proj.sessions, prompts: proj.prompts, apiCalls: proj.apiCalls, usage: proj.usage, cost: proj.cost, unpricedCalls: proj.unpricedCalls } : o.totals;
@@ -353,6 +415,20 @@
   });
   for (const b of document.querySelectorAll('.topctl .group button')) b.addEventListener('click', () => applyDensity(b.dataset.density));
   for (const t of TABS) $('tab-' + t).addEventListener('click', () => showTab(t));
+  $('trendBucket').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-bucket]');
+    if (!b || state.bucket === b.dataset.bucket) return;
+    state.bucket = b.dataset.bucket;
+    setPressed('trendBucket', 'bucket', state.bucket);
+    loadTrend();
+  });
+  $('trendMetric').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-metric]');
+    if (!b || state.metric === b.dataset.metric) return;
+    state.metric = b.dataset.metric;
+    setPressed('trendMetric', 'metric', state.metric);
+    renderTrend();
+  });
   document.addEventListener('click', (e) => {
     const b = e.target.closest('.toggle[data-target]');
     if (!b) return;
