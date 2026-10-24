@@ -5,7 +5,7 @@
 //   GET /api/session?id=                    1 セッションの指示別内訳
 //   GET /api/breakdown?project=&since=      キャッシュ作成の原因 / キャッシュ読取の構成
 //   GET /api/models?project=&since=         モデル別の内訳(call 単位)
-//   GET /api/timeseries?project=&since=&bucket=day|week&tz=  日別/週別の推移(tz = UTC との差(分)。ブラウザの getTimezoneOffset)
+//   GET /api/timeseries?project=&since=&bucket=hour|day|week&tz=  時間別/日別/週別の推移(tz = UTC との差(分)。ブラウザの getTimezoneOffset)
 //   GET /api/report?session=&top=           AI エージェント向けレポート(コンテキスト推定・ツール別追加・提案)
 //   POST /api/rescan                        キャッシュを使って再走査
 import http from 'node:http';
@@ -114,7 +114,8 @@ async function api(url, req, res) {
   }
   if (url.pathname === '/api/timeseries') {
     const since = url.searchParams.get('since') || '';
-    const bucket = url.searchParams.get('bucket') === 'week' ? 'week' : 'day';
+    const bk = url.searchParams.get('bucket');
+    const bucket = bk === 'week' || bk === 'hour' ? bk : 'day';
     const tz = Number(url.searchParams.get('tz'));
     const r = timeseries(filterByProject(sessions, project), { since, bucket, tzOffsetMin: Number.isFinite(tz) ? tz : 0 });
     return json(res, 200, { pricing: { updated: PRICING_UPDATED }, ...r });

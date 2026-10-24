@@ -38,8 +38,11 @@ npm start
   入力、出力。ツールチップに全項目の値)。サブエージェント分は主系列の分類対象外なので灰色の「分類外」。
   「4 区分」ボタンで従来の 4 色(読取・作成・入力・出力)に戻せる。セッション詳細の棒も同じ
   並び順・件数の選択と、20 件ずつの「もっと見る」
-- **タブ「推移」** — 日別 / 週別の積み上げ縦棒(トークンは 4 系列、「概算 USD」に切り替え可)。API 応答(call)のタイムスタンプで
-  振り分け、日の区切りは**ブラウザのローカル時刻**、週は月曜始まり。使っていない日・週も 0 として並べる。期間フィルタとサイドバーのプロジェクトで絞る
+- **タブ「推移」** — **縦軸 = トークン量、横軸 = 時間**の積み上げ面グラフ(目盛りの数値つき)。時間別 / 日別 / 週別を切り替え、
+  指標は「トークン(4 系列の積み上げ)」と「概算 USD」。API 応答(call)のタイムスタンプで振り分け、日の区切りは
+  **ブラウザのローカル時刻**、週は月曜始まり。使っていない時間・日・週も 0 として並べる。マウスを重ねると区間の内訳。
+  キャッシュ読取は他より桁違いに大きい(通常 98%)ので、**凡例を押して系列を外す**と他の系列の増減が見える。
+  期間フィルタとサイドバーのプロジェクトで絞る
 - **タブ「キャッシュ内訳」**
   - **キャッシュ作成の原因** — 初回 / モデル切替 / アイドル後(60 分超・5〜60 分)/ 圧縮 / 通常の追加。
     モデル切替・長いアイドル・圧縮は「同じ文脈の作り直し」で、指示ごとの行にも切替回数と再作成量を出す
@@ -94,7 +97,7 @@ API 応答(call)ごとに、モデル別の単価で `入力 + 出力 + キャ�
 | `GET /api/report?session=&top=` | AI エージェント向けレポート(下記 CLI と同じ JSON) |
 | `GET /api/breakdown?project=&since=` | キャッシュ作成の原因とキャッシュ読取の構成(src/attribution.mjs) |
 | `GET /api/models?project=&since=` | モデル別の内訳(src/models.mjs)。`/api/session` にも `modelRows` を付与 |
-| `GET /api/timeseries?project=&since=&bucket=day|week&tz=` | 日別 / 週別の推移(src/timeseries.mjs)。`tz` は UTC との差(分。ブラウザの `getTimezoneOffset`)、省略は UTC |
+| `GET /api/timeseries?project=&since=&bucket=hour\|day\|week&tz=` | 時間別 / 日別 / 週別の推移(src/timeseries.mjs)。各行の `t` は区間開始(ローカル時刻を UTC として表した擬似 epoch ms)。`tz` は UTC との差(分。ブラウザの `getTimezoneOffset`)、省略は UTC |
 
 `cost`(USD 概算)は `/api/overview`・`/api/prompts`・`/api/sessions`・`/api/session`・`/api/models`・`/api/report` の各行に付く。
 | `POST /api/rescan` | 再走査 |

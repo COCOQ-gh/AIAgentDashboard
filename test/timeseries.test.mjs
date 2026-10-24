@@ -33,3 +33,24 @@ test('since・タイムスタンプなし・<synthetic>・未登録モデル', (
   assert.deepEqual(r.rows.map((x) => [x.key, x.usage.total, x.unpricedCalls]), [['2026-10-10', 3, 1]]);
   assert.deepEqual(timeseries([]).rows, []);
 });
+
+test('時間別: 1 時間ごとに足し、空の時間も 0 で埋め、t は区間開始の擬似 epoch', () => {
+  const r = timeseries([session(call('2026-10-19T03:10:00Z', 1), call('2026-10-19T03:50:00Z', 2), call('2026-10-19T06:00:00Z', 4))], { bucket: 'hour' });
+  assert.equal(r.bucket, 'hour');
+  assert.equal(r.stepMs, 3_600_000);
+  assert.deepEqual(r.rows.map((x) => [x.key, x.usage.total]), [['2026-10-19T03', 3], ['2026-10-19T04', 0], ['2026-10-19T05', 0], ['2026-10-19T06', 4]]);
+  assert.equal(r.rows[0].t, Date.UTC(2026, 9, 19, 3));
+  assert.equal(r.rows[3].t - r.rows[0].t, 3 * 3_600_000, 't は等間隔');
+  // ローカル時刻(UTC+9)では UTC 03:10 は 12 時台
+  const jp = timeseries([session(call('2026-10-19T03:10:00Z', 1))], { bucket: 'hour', tzOffsetMin: -540 });
+  assert.equal(jp.rows[0].key, '2026-10-19T12');
+});
+
+test('日別・週別の行にも t(区間開始)が付き、間隔は step と一致する', () => {
+  const d = timeseries([session(call('2026-10-19T03:00:00Z', 1), call('2026-10-21T03:00:00Z', 1))]);
+  assert.equal(d.rows[0].t, Date.UTC(2026, 9, 19));
+  assert.equal(d.rows[2].t - d.rows[0].t, 2 * d.stepMs);
+  const w = timeseries([session(call('2026-10-19T03:00:00Z', 1), call('2026-11-03T03:00:00Z', 1))], { bucket: 'week' });
+  assert.equal(w.stepMs, 7 * 86_400_000);
+  assert.equal(new Date(w.rows[0].t).getUTCDay(), 1, '週の開始は月曜');
+});
