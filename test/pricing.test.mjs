@@ -16,6 +16,9 @@ test('callCost: 入力/出力/読取/書込(5 分 1.25 倍・1 時間 2 倍)を�
 test('callCost: Fable 5.1 の読取は $0.25(入力の 0.025 倍)、日付サフィックスは同じ単価', () => {
   near(callCost('claude-fable-5-1', usage(0, 0, 0, 4_000_000, 0)).usd, 1);
   near(callCost('claude-haiku-4-5-20251001', usage(1_000_000, 0, 0, 0, 0)).usd, 1);
+  const mythos = priceFor('claude-mythos-5-1');
+  assert.ok(mythos);
+  assert.deepEqual(mythos, priceFor('claude-fable-5-1'));
 });
 
 test('callCost: 単価未登録は 0 円で priced=false、<synthetic> は 0 円で priced=true', () => {

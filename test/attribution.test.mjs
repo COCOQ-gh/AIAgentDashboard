@@ -36,6 +36,28 @@ test('キャッシュ作成の原因: 初回 / 通常追加 / モデル切替 / 
   assert.equal(c.creationByCause.idleShort.calls, 1, '10 分後の呼出は短いアイドル');
 });
 
+test('<synthetic> 呼出はモデル切替と文脈縮小の判定から除外する', () => {
+  const growth = session([[
+    call({ min: 0, model: 'claude-opus-4-1', usage: u(1000, 0, 0, 10) }),
+    call({ min: 1, model: '<synthetic>', usage: u(0, 0, 0, 0) }),
+    call({ min: 2, model: 'claude-opus-4-1', usage: u(0, 100, 1000, 1) }),
+  ]]);
+  const b = analyzeSession(growth);
+  assert.equal(b.calls, 2, '合成呼出は集計対象外');
+  assert.deepEqual(b.modelSwitches, { count: 0, tokens: 0 });
+  assert.deepEqual(b.creationByCause.growth, { tokens: 100, calls: 1 });
+
+  const compacted = session([[
+    call({ min: 0, model: 'claude-opus-4-1', usage: u(30_000, 0, 0, 10) }),
+    call({ min: 1, model: '<synthetic>', usage: u(0, 0, 0, 0) }),
+    call({ min: 2, model: 'claude-opus-4-1', usage: u(0, 10_000, 0, 1) }),
+  ]]);
+  const c = analyzeSession(compacted);
+  assert.equal(c.calls, 2, '合成呼出は集計対象外');
+  assert.deepEqual(c.modelSwitches, { count: 0, tokens: 0 });
+  assert.deepEqual(c.creationByCause.compaction, { tokens: 10_000, calls: 1 });
+});
+
 test('キャッシュ読取の構成: 台帳の構成比で按分し、合計は cache_read の総和に一致する', () => {
   const s = session([
     [

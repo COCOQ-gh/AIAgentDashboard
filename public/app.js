@@ -13,8 +13,9 @@
   const TABS = ['prompts', 'trend', 'breakdown', 'models', 'sessions', 'detail'];
   const state = {
     project: '', sinceDays: '', sort: 'total', limit: PAGE, extra: 0, overview: null,
-    projQuery: '', projSort: 'total', tab: 'prompts', prevTab: 'prompts', bucket: 'day', metric: 'tokens', trend: null, split: true, detailSession: null, trendHidden: new Set(),
+    projQuery: '', projSort: 'total', tab: 'prompts', prevTab: 'prompts', bucket: 'day', bucketAuto: false, metric: 'tokens', trend: null, split: true, detailSession: null, trendHidden: new Set(),
   };
+  const requestSeq = { prompts: 0, sessions: 0, breakdown: 0, models: 0, trend: 0, totals: 0, detail: 0, filter: 0 };
 
   const fmt = (n) => {
     if (n == null) return '–';
@@ -35,6 +36,20 @@
     const r = await fetch(url, opts);
     if (!r.ok) throw new Error(url + ' -> ' + r.status);
     return r.json();
+  }
+  async function getLatest(view, url, opts) {
+    const seq = ++requestSeq[view];
+    try {
+      const r = await getJSON(url, opts);
+      return seq === requestSeq[view] ? r : null;
+    } catch (e) {
+      if (seq !== requestSeq[view]) return null;
+      throw e;
+    }
+  }
+  function showLoadError(e) {
+    $('scanMeta').textContent = '読み込みに失敗: ' + e.message;
+    console.error(e);
   }
   function sinceISO() {
     if (!state.sinceDays) return '';
@@ -279,7 +294,7 @@
     for (const p of list) {
       ul.appendChild(projRow({
         key: p.key, label: projName(p.key, p.cwd), value: p.usage.total, usage: p.usage,
-        meta: `${day(p.lastActivity)} · ${full(p.sessions)} セッション · 指示 ${full(p.prompts)} 件`,
+        meta: `${day(p.lastActivity)} · ${full(p.sessions)} セッション · 指示 ${full(p.prompts)} 件${p.worktrees > 0 ? ` · worktree ${full(p.worktrees)}` : ''}`,
         max, title: p.cwd || p.key,
       }));
     }
@@ -321,6 +336,17 @@
     $('kpis').innerHTML = items.map(([l, v, n, cls]) =>
       `<div class="kpi ${cls || ''}"><div class="l" title="${esc(l)}">${esc(l)}</div><div class="v">${v}</div><div class="n">${esc(n)}</div></div>`).join('');
   }
+  async function loadTotals() {
+    const projectKey = state.project;
+    const project = projectKey && state.overview ? state.overview.projects.find((p) => p.key === projectKey) : null;
+    const periodLabel = state.sinceDays ? $('sinceSel').selectedOptions[0].textContent.trim() : '';
+    const scopeLabel = [periodLabel, project ? projName(project.key, project.cwd) : (projectKey || '')].filter(Boolean).join(' · ');
+    const q = new URLSearchParams({ project: projectKey, since: sinceISO() });
+    const totals = await getLatest('totals', '/api/totals?' + q);
+    if (!totals) return null;
+    renderKpis(totals, totals.prompts, scopeLabel);
+    return totals;
+  }
   async function loadOverview() {
     const o = await getJSON('/api/overview');
     state.overview = o;
@@ -333,7 +359,8 @@
   async function loadPrompts() {
     const limit = state.limit + state.extra;
     const q = new URLSearchParams({ project: state.project, sort: state.sort, limit, since: sinceISO() });
-    const r = await getJSON('/api/prompts?' + q);
+    const r = await getLatest('prompts', '/api/prompts?' + q);
+    if (!r) return null;
     const max = Math.max(0, ...r.prompts.map((p) => p.usage.total));
     const swText = (p) => (p.modelSwitches ? ` · モデル切替 ${p.modelSwitches} 回(${fmt(p.switchTokens)} 再作成)` : '');
     renderBars($('promptBars'), r.prompts.map((p) => stackedRow(p.text || '(空の指示)', `${when(p.timestamp)} · ${projName(p.projectKey, p.cwd)} · API ${p.apiCalls} 回 · ${usd(p.cost)}${swText(p)}`, p.usage, max, p.text,
@@ -342,13 +369,18 @@
     $('promptsTable').innerHTML = usageTable([{ label: '日時' }, { label: '指示' }, { label: 'プロジェクト' }, { label: 'API', num: true }, { label: 'ツール', num: true }, ...usageCols, { label: '概算 USD', num: true }],
       r.prompts.map((p) => [when(p.timestamp), p.text, projName(p.projectKey, p.cwd), full(p.apiCalls), full(p.toolUses), ...usageCells(p.usage), usd(p.cost)]));
     const more = $('moreBtn');
-    more.hidden = r.count <= r.prompts.length;
+    const capped = r.count > r.prompts.length && r.prompts.length < limit;
+    more.hidden = capped || r.count <= r.prompts.length;
     more.textContent = `もっと見る(${full(r.prompts.length)} / ${full(r.count)} 件)`;
+    const note = $('moreNote');
+    note.hidden = !capped;
+    note.textContent = capped ? `上限 ${full(r.prompts.length)} 件まで表示(全 ${full(r.count)} 件)` : '';
     return r;
   }
   async function loadBreakdown() {
     const q = new URLSearchParams({ project: state.project, since: sinceISO() });
-    const b = await getJSON('/api/breakdown?' + q);
+    const b = await getLatest('breakdown', '/api/breakdown?' + q);
+    if (!b) return null;
     const pct = (x) => Math.round(x * 100) + '%';
     const causes = b.causes.filter((r) => r.calls > 0);
     const maxC = Math.max(0, ...causes.map((r) => r.tokens));
@@ -360,6 +392,7 @@
     renderBars($('compBars'), comps.map((r) => singleRow(r.label, pct(r.pct), r.tokens, maxK, `<div class="tt-title">${esc(r.label)}</div><div class="row"><span>トークン</span><span>${full(r.tokens)}</span></div>`)));
     $('compSub').textContent = `キャッシュ読取 ${fmt(b.cacheRead)} トークンを「文脈に積まれた内容の由来」で按分した概算(出力は上限側)。`;
     $('compTable').innerHTML = usageTable([{ label: '文脈の由来' }, { label: 'トークン', num: true, total: true }, { label: '比率', num: true }], comps.map((r) => [r.label, full(r.tokens), pct(r.pct)]));
+    return b;
   }
   // モデル別の行(モデルタブとセッション詳細で共用)。比率は合計トークンに対する割合
   const pctText = (x) => (x >= 0.995 ? '100%' : x >= 0.1 ? Math.round(x * 100) + '%' : (x * 100).toFixed(1) + '%');
@@ -371,7 +404,8 @@
   const modelCols = [{ label: 'モデル' }, { label: '比率', num: true }, { label: 'API', num: true }, { label: 'セッション', num: true }, ...usageCols, { label: '概算 USD', num: true }];
   const modelCells = (r) => [r.model, pctText(r.share), full(r.calls), full(r.sessions), ...usageCells(r.usage), r.unpricedCalls ? '未登録' : usd(r.cost)];
   async function loadModels() {
-    const r = await getJSON('/api/models?' + new URLSearchParams({ project: state.project, since: sinceISO() }));
+    const r = await getLatest('models', '/api/models?' + new URLSearchParams({ project: state.project, since: sinceISO() }));
+    if (!r) return null;
     renderBars($('modelBars'), modelBarRows(r.models));
     $('modelsTable').innerHTML = usageTable(modelCols, r.models.map(modelCells));
     return r;
@@ -501,30 +535,39 @@
   }
   async function loadTrend() {
     const q = new URLSearchParams({ project: state.project, since: sinceISO(), bucket: state.bucket, tz: String(new Date().getTimezoneOffset()) });
-    state.trend = await getJSON('/api/timeseries?' + q);
+    const r = await getLatest('trend', '/api/timeseries?' + q);
+    if (!r) return null;
+    state.trend = r;
     renderTrend();
+    return r;
   }
   function setPressed(groupId, attr, value) {
     for (const b of $(groupId).querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset[attr] === value));
   }
   async function loadSessions() {
-    const r = await getJSON('/api/sessions?' + new URLSearchParams({ project: state.project }));
+    const r = await getLatest('sessions', '/api/sessions?' + new URLSearchParams({ project: state.project, since: sinceISO() }));
+    if (!r) return null;
     const list = $('sessionList');
     list.innerHTML = r.sessions.length ? '' : '<div class="empty">セッションがありません</div>';
     for (const s of r.sessions) {
       const el = document.createElement('div');
       el.className = 'sess';
-      el.innerHTML = `<div class="t">${esc(s.title)}</div><div class="n">${fmt(s.usage.total)}</div><div class="d">${when(s.startedAt)} · ${projName(s.projectKey, s.cwd)} · 指示 ${s.prompts} 件 · ${usd(s.cost)}${s.error ? ' · 読込エラー' : ''}</div>`;
+      el.innerHTML = `<div class="t">${esc(s.title)}</div><div class="n">${fmt(s.usage.total)}</div><div class="d">${when(s.startedAt)} · ${esc(projName(s.projectKey, s.cwd))} · 指示 ${full(s.prompts)} 件 · ${usd(s.cost)}${s.error ? ' · 読込エラー' : ''}</div>`;
       el.addEventListener('click', () => openSession(s.sessionId));
       list.appendChild(el);
     }
   }
   async function openSession(id) {
-    const s = await getJSON('/api/session?' + new URLSearchParams({ id }));
-    state.detailSession = s;
-    renderDetail(s);
-    $('tab-detail').hidden = false;
-    showTab('detail');
+    try {
+      const s = await getLatest('detail', '/api/session?' + new URLSearchParams({ id }));
+      if (!s) return;
+      state.detailSession = s;
+      renderDetail(s);
+      $('tab-detail').hidden = false;
+      showTab('detail');
+    } catch (e) {
+      showLoadError(e);
+    }
   }
   function renderDetail(s) {
     $('detailTitle').textContent = `セッション: ${s.title}`;
@@ -543,19 +586,30 @@
 
   // ---- wiring -------------------------------------------------------------
   async function onFilterChange(keepExtra = false) {
+    const filterSeq = ++requestSeq.filter;
+    const previousSince = state.sinceDays;
     state.sinceDays = $('sinceSel').value;
+    if (state.sinceDays !== previousSince) {
+      if (state.sinceDays === '1') {
+        state.bucket = 'hour';
+        state.bucketAuto = true;
+        setPressed('trendBucket', 'bucket', state.bucket);
+      } else if (state.bucketAuto && state.bucket === 'hour') {
+        state.bucket = 'day';
+        state.bucketAuto = false;
+        setPressed('trendBucket', 'bucket', state.bucket);
+      }
+    }
     state.sort = $('sortSel').value;
     state.limit = Number($('limitSel').value);
     if (!keepExtra) state.extra = 0;
     document.body.style.opacity = '0.85';
     try {
-      const [, r] = await Promise.all([loadSessions(), loadPrompts(), loadBreakdown(), loadModels(), loadTrend()]);
-      const o = state.overview;
-      const proj = state.project ? o.projects.find((x) => x.key === state.project) : null;
-      const totals = proj ? { sessions: proj.sessions, prompts: proj.prompts, apiCalls: proj.apiCalls, usage: proj.usage, cost: proj.cost, unpricedCalls: proj.unpricedCalls } : o.totals;
-      renderKpis(totals, r.count, proj ? projName(proj.key, proj.cwd) : '');
+      await Promise.all([loadSessions(), loadPrompts(), loadBreakdown(), loadModels(), loadTrend(), loadTotals()]);
+    } catch (e) {
+      if (filterSeq === requestSeq.filter) showLoadError(e);
     } finally {
-      document.body.style.opacity = '';
+      if (filterSeq === requestSeq.filter) document.body.style.opacity = '';
     }
   }
   async function refreshAll() {
@@ -563,17 +617,19 @@
       await loadOverview();
       await onFilterChange();
     } catch (e) {
-      $('scanMeta').textContent = '読み込みに失敗: ' + e.message;
-      console.error(e);
+      showLoadError(e);
     }
   }
   for (const id of ['sinceSel', 'sortSel', 'limitSel']) $(id).addEventListener('change', () => onFilterChange());
   $('projQuery').addEventListener('input', () => { state.projQuery = $('projQuery').value; renderSidebar(); });
   $('projSort').addEventListener('change', () => { state.projSort = $('projSort').value; renderSidebar(); });
-  $('moreBtn').addEventListener('click', () => { state.extra += PAGE; onFilterChange(true); });
+  $('moreBtn').addEventListener('click', async () => {
+    state.extra += PAGE;
+    try { await loadPrompts(); } catch (e) { showLoadError(e); }
+  });
   $('rescanBtn').addEventListener('click', async () => {
     $('rescanBtn').disabled = true;
-    try { await getJSON('/api/rescan', { method: 'POST' }); await refreshAll(); } finally { $('rescanBtn').disabled = false; }
+    try { await getJSON('/api/rescan', { method: 'POST' }); await refreshAll(); } catch (e) { showLoadError(e); } finally { $('rescanBtn').disabled = false; }
   });
   for (const b of document.querySelectorAll('.topctl .group button')) b.addEventListener('click', () => applyDensity(b.dataset.density));
   for (const t of TABS) $('tab-' + t).addEventListener('click', () => showTab(t));
@@ -585,7 +641,7 @@
     state.split = on;
     setPressed('splitToggle', 'split', on ? '1' : '0');
     renderLegend();
-    loadPrompts();
+    loadPrompts().catch(showLoadError);
     if (state.detailSession) renderDetail(state.detailSession);
   });
   $('trendLegend').addEventListener('click', (e) => {
@@ -603,10 +659,12 @@
   });
   $('trendBucket').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-bucket]');
-    if (!b || state.bucket === b.dataset.bucket) return;
+    if (!b) return;
+    state.bucketAuto = false;
+    if (state.bucket === b.dataset.bucket) return;
     state.bucket = b.dataset.bucket;
     setPressed('trendBucket', 'bucket', state.bucket);
-    loadTrend();
+    loadTrend().catch(showLoadError);
   });
   $('trendMetric').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-metric]');
@@ -625,6 +683,7 @@
     b.textContent = t.hidden ? '表で見る' : 'グラフで見る';
   });
   $('detailClose').addEventListener('click', () => {
+    requestSeq.detail += 1;
     $('tab-detail').hidden = true;
     showTab(state.prevTab === 'detail' ? 'prompts' : state.prevTab);
   });

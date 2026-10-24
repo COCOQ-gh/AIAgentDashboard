@@ -15,6 +15,8 @@
 //    「直前の呼出のツール結果(ツールが複数なら等分)」か、指示の最初の呼出なら「指示本文+注入文脈」。
 //    過去の thinking は文脈から落ちることがあるため assistantOutput は上限側の概算。
 
+import { isSyntheticModel } from './model-name.mjs';
+
 export const CAUSES = ['first', 'modelSwitch', 'idleLong', 'compaction', 'idleShort', 'growth'];
 export const CAUSE_LABELS = {
   first: '初回(初期コンテキスト)',
@@ -67,7 +69,7 @@ export function orderedMainCalls(session) {
   for (const p of session.prompts) {
     let first = true;
     for (const c of p.calls) {
-      if (c.sidechain) continue;
+      if (c.sidechain || isSyntheticModel(c.model)) continue;
       out.push({ ...c, promptIndex: p.index, firstOfPrompt: first });
       first = false;
     }

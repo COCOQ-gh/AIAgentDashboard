@@ -117,18 +117,19 @@ h1 { font-size: calc(var(--fs-title) + 3px); margin: 0; font-weight: 600; white-
 .side-count { color: var(--muted); font-size: var(--fs-small); font-variant-numeric: tabular-nums; }
 .side-ctl { display: grid; gap: 6px; padding: 0 12px 10px; border-bottom: 1px solid var(--grid); }
 .side-ctl input, .side-ctl select { width: 100%; }
-.side-list { min-height: 0; overflow: auto; list-style: none; margin: 0; padding: 6px; }
+.side-list { min-height: 0; overflow-x: hidden; overflow-y: auto; list-style: none; margin: 0; padding: 6px; }
+.side-list > li { min-width: 0; }
 .pj {
-  width: 100%; text-align: left; background: transparent; border: 0; border-radius: 6px;
+  width: 100%; min-width: 0; max-width: 100%; text-align: left; background: transparent; border: 0; border-radius: 6px;
   padding: 6px 8px; display: grid; gap: 1px; cursor: pointer; box-shadow: inset 0 0 0 0 var(--s-single);
 }
 .pj:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); border-color: transparent; }
 .pj[aria-pressed="true"] { background: var(--sel); box-shadow: inset 2px 0 0 0 var(--s-single); }
-.pj .top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.pj .nm { font-size: var(--fs-label); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj .top { display: flex; width: 100%; min-width: 0; align-items: baseline; justify-content: space-between; gap: 8px; }
+.pj .nm { flex: 1 1 auto; font-size: var(--fs-label); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pj[aria-pressed="true"] .nm { font-weight: 600; }
 .pj .vl { flex: none; font-size: var(--fs-small); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.pj .mt { font-size: var(--fs-small); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj .mt { width: 100%; min-width: 0; font-size: var(--fs-small); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pj .mini { display: flex; height: 3px; border-radius: 2px; overflow: hidden; background: var(--grid); margin-top: 3px; }
 .pj .mini .fill { display: flex; height: 100%; min-width: 0; }
 .pj .mini i { height: 100%; min-width: 0; }
@@ -242,8 +243,9 @@ figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
 .seg.output { background: var(--s-output); }
 .bars .track:hover .seg { filter: brightness(1.08); }
 .empty { color: var(--ink-2); font-size: var(--fs-sub); padding: 12px 0; }
-.more { display: flex; justify-content: center; margin-top: 14px; }
+.more { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 14px; }
 .more button { padding: 7px 18px; }
+.more span { color: var(--ink-2); font-size: var(--fs-small); }
 
 /* 表ビュー: グラフと同じ数値を WCAG 的に読める形で。高さはペインに任せる。 */
 .tableview table { border-collapse: collapse; width: 100%; font-size: var(--fs-sub); }

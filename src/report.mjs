@@ -9,6 +9,7 @@
 //     最初の呼出(指示本文 + 注入されたシステム文脈)は '(指示+システム)' に計上する
 
 import { analyzeSession, causeRows, componentRows } from './attribution.mjs';
+import { isSyntheticModel } from './model-name.mjs';
 import { modelRows } from './models.mjs';
 import { PRICING_UPDATED, formatUsd } from './pricing.mjs';
 
@@ -42,7 +43,7 @@ export function pickSession(sessions, { sessionId, cwd } = {}) {
 }
 
 function mainCalls(p) {
-  return p.calls.filter((c) => !c.sidechain);
+  return p.calls.filter((c) => !c.sidechain && !isSyntheticModel(c.model));
 }
 
 /** ツール別の文脈追加(概算)。戻り値は addedTokens 降順。 */
@@ -192,8 +193,18 @@ function cell(s) {
   return String(s).replace(/\|/g, '\\|').replace(/\s+/g, ' ');
 }
 
-function hhmm(ts) {
-  return ts ? ts.slice(11, 16) : '-';
+const pad2 = (n) => String(n).padStart(2, '0');
+
+export function formatLocalTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+export function formatLocalDateTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${formatLocalTime(ts)}`;
 }
 
 export function renderMarkdown(r) {
@@ -202,7 +213,7 @@ export function renderMarkdown(r) {
   const out = [];
   out.push(`# トークン消費レポート: ${s.title} (${s.sessionId})`);
   out.push('');
-  out.push(`- cwd: ${s.cwd || '-'} / 期間: ${s.startedAt || '-'} → ${s.endedAt || '-'}`);
+  out.push(`- cwd: ${s.cwd || '-'} / 期間: ${formatLocalDateTime(s.startedAt)} → ${formatLocalDateTime(s.endedAt)}`);
   out.push(`- 指示 ${s.prompts} 件 / API 呼出 ${s.apiCalls} 回 / ツール呼出 ${s.toolUses} 回 / モデル: ${Object.keys(s.models).join(', ') || '-'}`);
   out.push(`- 合計 ${fmt(u.total)} トークン(入力 ${fmt(u.input)} / キャッシュ作成 ${fmt(u.cacheCreation)} / キャッシュ読取 ${fmt(u.cacheRead)} / 出力 ${fmt(u.output)})${s.sidechainTokens ? ` うちサブエージェント ${fmt(s.sidechainTokens)}` : ''}`);
   out.push(`- 概算コスト ${formatUsd(s.cost)}(単価 ${s.pricingUpdated} 時点の API 従量価格での概算${s.unpricedCalls ? `。単価未登録のモデル ${s.unpricedCalls} 回は除外` : ''})`);
@@ -214,7 +225,7 @@ export function renderMarkdown(r) {
   out.push(`## 消費の多い指示(上位 ${r.top.length})`);
   out.push('| # | 時刻 | 指示 | API | ツール | 合計 | 出力 | 文脈終端 |');
   out.push('|---|---|---|---|---|---|---|---|');
-  for (const p of r.top) out.push(`| ${p.index} | ${hhmm(p.timestamp)} | ${cell(p.text.slice(0, 60))} | ${p.apiCalls} | ${p.toolUses} | ${fmt(p.usage.total)} | ${fmt(p.usage.output)} | ${fmt(p.contextEnd)} |`);
+  for (const p of r.top) out.push(`| ${p.index} | ${formatLocalTime(p.timestamp)} | ${cell(p.text.slice(0, 60))} | ${p.apiCalls} | ${p.toolUses} | ${fmt(p.usage.total)} | ${fmt(p.usage.output)} | ${fmt(p.contextEnd)} |`);
   out.push('');
   if (r.modelRows && r.modelRows.length) {
     out.push('## モデル別');
@@ -237,7 +248,7 @@ export function renderMarkdown(r) {
     for (const x of c.causes) if (x.calls) out.push(`| ${x.label} | ${x.calls} | ${fmt(x.tokens)} | ${Math.round(x.pct * 100)}% |`);
     if (c.switches.length) {
       out.push('');
-      out.push('モデル切替: ' + c.switches.map((s) => `${hhmm(s.timestamp)} ${s.from} → ${s.to}(${fmt(s.cacheCreation)})`).join(' / '));
+      out.push('モデル切替: ' + c.switches.map((s) => `${formatLocalTime(s.timestamp)} ${s.from} → ${s.to}(${fmt(s.cacheCreation)})`).join(' / '));
     }
     out.push('');
     out.push(`## キャッシュ読取の構成(${fmt(c.cacheRead)} トークン・概算)`);
@@ -251,7 +262,7 @@ export function renderMarkdown(r) {
   out.push('|---|---|---|---|---|---|---|---|');
   const tail = r.prompts.length > 30 ? r.prompts.slice(-30) : r.prompts;
   if (tail.length < r.prompts.length) out.push(`| … | | | (先頭 ${r.prompts.length - tail.length} 件省略) | | | | |`);
-  for (const p of tail) out.push(`| ${p.index} | ${hhmm(p.timestamp)} | ${p.kind} | ${cell(p.text.slice(0, 50))} | ${p.apiCalls} | ${p.toolUses} | ${fmt(p.usage.total)} | ${fmt(p.contextEnd)} |`);
+  for (const p of tail) out.push(`| ${p.index} | ${formatLocalTime(p.timestamp)} | ${p.kind} | ${cell(p.text.slice(0, 50))} | ${p.apiCalls} | ${p.toolUses} | ${fmt(p.usage.total)} | ${fmt(p.contextEnd)} |`);
   out.push('');
   out.push('> 推定の根拠: コンテキスト = 最後の API 呼出の input + cache_read + cache_creation。窓の大きさはモデル名からの推定(AIAD_CONTEXT_WINDOW で上書き)。ツール別の追加は「次の呼出で新たに入力されたトークン」を直前の呼出のツールへ按分した概算。キャッシュ作成の原因は直前の呼出との関係(model の変化 / 経過時間 60 分・5 分 / 文脈の 30% 超の縮小)で分類。キャッシュ読取の構成は「文脈に積まれた内容の由来」を台帳で追跡し各呼出の読取量を構成比で按分した概算(過去の thinking は落ちることがあるため出力は上限側)。');
   return out.join('\n');
@@ -267,6 +278,6 @@ export function listRows(sessions) {
 
 export function renderListMarkdown(rows, projectKey) {
   const out = [`# セッション一覧: ${projectKey || '(全プロジェクト)'}(${rows.length} 件・新しい順)`, '', '| 最終更新 | セッション | 指示 | API | 合計 | 出力 | 概算 USD | 題名 |', '|---|---|---|---|---|---|---|---|'];
-  for (const r of rows) out.push(`| ${(r.endedAt || '-').slice(0, 16)} | ${r.sessionId} | ${r.prompts} | ${r.apiCalls} | ${fmt(r.total)} | ${fmt(r.output)} | ${formatUsd(r.cost)} | ${cell(String(r.title || '').slice(0, 40))} |`);
+  for (const r of rows) out.push(`| ${formatLocalDateTime(r.endedAt)} | ${r.sessionId} | ${r.prompts} | ${r.apiCalls} | ${fmt(r.total)} | ${fmt(r.output)} | ${formatUsd(r.cost)} | ${cell(String(r.title || '').slice(0, 40))} |`);
   return out.join('\n');
 }

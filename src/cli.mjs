@@ -5,7 +5,7 @@
 //                    [--top N] [--format md|json] [--window <tokens>]
 //
 // 既定: $CLAUDE_CODE_SESSION_ID のセッション(無ければ cwd と同じプロジェクトの最新セッション)。
-// 走査は cwd に対応する ~/.claude/projects/<key>/ だけ(フォーク重複排除・サブエージェント合流は同じ)。
+// 走査は cwd に対応する(または --project で指定した) ~/.claude/projects/<key>/ だけ(フォーク重複排除・サブエージェント合流は同じ)。
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { TranscriptStore, defaultProjectsDir } from './scan.mjs';
@@ -32,7 +32,7 @@ function parseArgs(argv) {
 
 const HELP = `usage: node src/cli.mjs [--session <id>] [--cwd <dir>] [--project <key>] [--list] [--latest] [--top N] [--format md|json] [--window <tokens>]
   --session   セッション ID(既定: $CLAUDE_CODE_SESSION_ID)
-  --latest    環境変数を無視し、cwd と同じプロジェクトの最新セッションを対象にする
+  --latest    環境変数を無視し、対象プロジェクトの最新セッションを対象にする
   --cwd       プロジェクトを決める作業ディレクトリ(既定: process.cwd())
   --project   ~/.claude/projects/ 配下のディレクトリ名を直接指定(cwd からの導出を上書き)
   --list      対象プロジェクトのセッション一覧を出す
@@ -53,8 +53,14 @@ export async function main(argv = process.argv.slice(2)) {
   if (o.help) return console.log(HELP);
   const projectsDir = defaultProjectsDir();
   let projectKey = o.project || projectKeyFromCwd(path.resolve(o.cwd));
+  const projectExists = await dirExists(path.join(projectsDir, projectKey));
+  if (o.project && !projectExists) {
+    console.error(`project not found: ${o.project}`);
+    process.exitCode = 1;
+    return;
+  }
   // 導出したディレクトリが無ければ全プロジェクトを走査して cwd で突合する(導出規則の保険)
-  if (!(await dirExists(path.join(projectsDir, projectKey)))) projectKey = null;
+  if (!projectExists) projectKey = null;
   let store = new TranscriptStore(projectsDir, { projectKey });
   let sessions = await store.scan();
 
@@ -63,7 +69,7 @@ export async function main(argv = process.argv.slice(2)) {
     return console.log(o.format === 'json' ? JSON.stringify({ projectKey, scan: store.lastScan, sessions: rows }, null, 2) : renderListMarkdown(rows, projectKey));
   }
 
-  let session = pickSession(sessions, { sessionId: o.session, cwd: o.cwd });
+  let session = pickSession(sessions, { sessionId: o.session, cwd: o.project ? null : o.cwd });
   if (!session && o.session && projectKey) {
     // 指定 ID が cwd のプロジェクトに無い → 全プロジェクトから探す
     store = new TranscriptStore(projectsDir, { projectKey: null });

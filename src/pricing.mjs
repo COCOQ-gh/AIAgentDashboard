@@ -13,6 +13,8 @@ export const PRICING_UPDATED = '2026-10-06';
 
 /** @type {Record<string, {in: number, out: number, read: number, long?: {above: number, in: number, out: number, read: number}}>} */
 export const MODELS = {
+  // Mythos 5.1 は Fable 5.1 と同単価(2026-10-06 時点)
+  'claude-mythos-5-1': { in: 10, out: 50, read: 0.25 },
   'claude-fable-5-1': { in: 10, out: 50, read: 0.25 },
   'claude-fable-5': { in: 10, out: 50, read: 1 },
   'claude-opus-5-5': { in: 4, out: 20, read: 0.2 },

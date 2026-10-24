@@ -10,6 +10,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { Worker } from 'node:worker_threads';
 import { parseTranscript, emptyUsage, addUsage, newPrompt, recomputeSession } from './parse.mjs';
+import { projectKeyFromCwd } from './report.mjs';
 
 export function defaultProjectsDir() {
   return process.env.CLAUDE_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects');
@@ -267,7 +268,21 @@ export function resolveSessions(parsed) {
     s.prompts = kept;
     recomputeSession(s);
   }
-  return mains;
+  return groupWorktrees(mains);
+}
+
+/** Claude Code worktree のセッションを元リポジトリのプロジェクトへまとめる(入力は変更しない)。 */
+export function groupWorktrees(sessions) {
+  return sessions.map((s) => {
+    const m = typeof s.cwd === 'string' ? /^(.*?)[\\/]\.claude[\\/]worktrees[\\/][^\\/]+/.exec(s.cwd) : null;
+    if (!m || !m[1]) return { ...s, projectCwd: s.cwd };
+    return {
+      ...s,
+      worktree: s.projectKey,
+      projectCwd: m[1],
+      projectKey: projectKeyFromCwd(m[1]),
+    };
+  });
 }
 
 /** プロジェクト別の集計(セッションの cwd を名前に使う。無ければディレクトリ名)。 */
@@ -276,10 +291,11 @@ export function summarizeProjects(sessions) {
   for (const s of sessions) {
     let p = byKey.get(s.projectKey);
     if (!p) {
-      p = { key: s.projectKey, cwd: null, sessions: 0, prompts: 0, apiCalls: 0, usage: emptyUsage(), cost: 0, unpricedCalls: 0, firstActivity: null, lastActivity: null, models: {} };
+      p = { key: s.projectKey, cwd: null, sessions: 0, prompts: 0, apiCalls: 0, usage: emptyUsage(), cost: 0, unpricedCalls: 0, firstActivity: null, lastActivity: null, models: {}, worktreeKeys: new Set() };
       byKey.set(s.projectKey, p);
     }
-    if (s.cwd && !p.cwd) p.cwd = s.cwd;
+    if ((s.projectCwd || s.cwd) && !p.cwd) p.cwd = s.projectCwd || s.cwd;
+    if (s.worktree) p.worktreeKeys.add(s.worktree);
     p.sessions++;
     p.prompts += s.prompts.length;
     p.apiCalls += s.apiCalls;
@@ -290,13 +306,16 @@ export function summarizeProjects(sessions) {
     if (s.endedAt && (!p.lastActivity || s.endedAt > p.lastActivity)) p.lastActivity = s.endedAt;
     for (const [m, c] of Object.entries(s.models)) p.models[m] = (p.models[m] || 0) + c;
   }
-  return [...byKey.values()].sort((a, b) => b.usage.total - a.usage.total);
+  return [...byKey.values()]
+    .map(({ worktreeKeys, ...p }) => ({ ...p, worktrees: worktreeKeys.size }))
+    .sort((a, b) => b.usage.total - a.usage.total);
 }
 
 export function sessionSummary(s) {
   return {
     sessionId: s.sessionId,
     projectKey: s.projectKey,
+    worktree: s.worktree || null,
     title: s.title,
     cwd: s.cwd,
     startedAt: s.startedAt,

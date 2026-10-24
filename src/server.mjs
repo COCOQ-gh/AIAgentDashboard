@@ -1,7 +1,8 @@
 // 依存ゼロの HTTP サーバ。静的 UI(public/)と JSON API を同一ポートで配信する。
 //   GET /api/overview                       プロジェクト別集計 + 全体合計
+//   GET /api/totals?project=&since=         期間・プロジェクト別 KPI 合計(call 時刻基準)
 //   GET /api/prompts?project=&limit=&sort=  指示一覧(トークン降順など)
-//   GET /api/sessions?project=              セッション一覧
+//   GET /api/sessions?project=&since=       セッション一覧(終了時刻で期間絞り込み)
 //   GET /api/session?id=                    1 セッションの指示別内訳
 //   GET /api/breakdown?project=&since=      キャッシュ作成の原因 / キャッシュ読取の構成
 //   GET /api/models?project=&since=         モデル別の内訳(call 単位)
@@ -13,12 +14,13 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TranscriptStore, summarizeProjects, sessionSummary, flattenPrompts, promptView } from './scan.mjs';
-import { emptyUsage, addUsage } from './parse.mjs';
 import { buildReport } from './report.mjs';
 import { analyzeSession, emptyBreakdown, addBreakdown, causeRows, componentRows } from './attribution.mjs';
 import { modelRows } from './models.mjs';
 import { PRICING_UPDATED } from './pricing.mjs';
 import { timeseries } from './timeseries.mjs';
+import { periodTotals, sessionInPeriod } from './totals.mjs';
+import { isAllowedHost, isAllowedOrigin } from './host-check.mjs';
 
 // セッションごとのキャッシュ内訳(since 無し)はセッションオブジェクトに紐づけてメモ化する(再走査で作り直される)
 const analysisCache = new WeakMap();
@@ -57,6 +59,7 @@ function filterByProject(list, project) {
 
 async function api(url, req, res) {
   if (url.pathname === '/api/rescan' && req.method === 'POST') {
+    if (!isAllowedOrigin(req.headers.origin, HOST)) return json(res, 403, { error: 'forbidden host' });
     await rescan();
     return json(res, 200, { ok: true, scan: store.lastScan });
   }
@@ -65,18 +68,15 @@ async function api(url, req, res) {
 
   if (url.pathname === '/api/overview') {
     const projects = summarizeProjects(sessions);
-    const totals = { sessions: sessions.length, prompts: 0, apiCalls: 0, usage: emptyUsage(), cost: 0, unpricedCalls: 0 };
-    for (const p of projects) {
-      totals.prompts += p.prompts;
-      totals.apiCalls += p.apiCalls;
-      addUsage(totals.usage, p.usage);
-      totals.cost += p.cost;
-      totals.unpricedCalls += p.unpricedCalls;
-    }
+    const { since, ...totals } = periodTotals(sessions, { since: '' });
     return json(res, 200, { projectsDir: store.projectsDir, scan: store.lastScan, pricing: { updated: PRICING_UPDATED }, totals, projects });
   }
+  if (url.pathname === '/api/totals') {
+    const since = url.searchParams.get('since') || '';
+    return json(res, 200, { ...periodTotals(filterByProject(sessions, project), { since }), project });
+  }
   if (url.pathname === '/api/prompts') {
-    const limit = Math.min(Number(url.searchParams.get('limit') || 50), 1000);
+    const limit = Math.min(Number(url.searchParams.get('limit') || 50), 5000);
     const sort = url.searchParams.get('sort') || 'total';
     const since = url.searchParams.get('since') || '';
     const scoped = filterByProject(sessions, project);
@@ -88,7 +88,8 @@ async function api(url, req, res) {
     return json(res, 200, { count: list.length, prompts: list.slice(0, limit) });
   }
   if (url.pathname === '/api/sessions') {
-    const list = filterByProject(sessions, project).map(sessionSummary).sort((a, b) => (b.endedAt || '') < (a.endedAt || '') ? -1 : 1);
+    const since = url.searchParams.get('since') || '';
+    const list = filterByProject(sessions, project).filter((s) => sessionInPeriod(s, since)).map(sessionSummary).sort((a, b) => (b.endedAt || '') < (a.endedAt || '') ? -1 : 1);
     return json(res, 200, { sessions: list });
   }
   if (url.pathname === '/api/session') {
@@ -144,8 +145,9 @@ async function serveStatic(url, res) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
+    if (!isAllowedHost(req.headers.host, HOST)) return json(res, 403, { error: 'forbidden host' });
+    const url = new URL(req.url, 'http://localhost');
     if (url.pathname.startsWith('/api/')) await api(url, req, res);
     else await serveStatic(url, res);
   } catch (e) {

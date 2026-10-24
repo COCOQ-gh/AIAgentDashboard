@@ -2,13 +2,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseTranscript } from '../src/parse.mjs';
 import { resolveSessions } from '../src/scan.mjs';
-import { projectKeyFromCwd, contextTokens, contextWindowFor, pickSession, toolCosts, buildReport, renderMarkdown, listRows } from '../src/report.mjs';
+import { projectKeyFromCwd, contextTokens, contextWindowFor, pickSession, toolCosts, buildReport, renderMarkdown, listRows, renderListMarkdown, formatLocalTime, formatLocalDateTime } from '../src/report.mjs';
 
 const J = (o) => JSON.stringify(o);
 const usage = (input, cc, cr, output) => ({ input_tokens: input, cache_creation_input_tokens: cc, cache_read_input_tokens: cr, output_tokens: output });
 const human = (text, promptId, ts) => J({ type: 'user', origin: { kind: 'human' }, promptId, uuid: 'u-' + promptId, timestamp: ts, cwd: 'H:\\AI\\Proj', message: { role: 'user', content: text } });
 const assistant = (id, u, ts, tools = [], extra = {}) =>
   J({ type: 'assistant', uuid: 'a-' + id, timestamp: ts, message: { id, role: 'assistant', model: 'claude-fable-5-1', usage: u, content: [{ type: 'text', text: 'x' }, ...tools.map((name) => ({ type: 'tool_use', name, id: 't-' + name, input: {} }))] }, ...extra });
+const synthetic = (id, ts) =>
+  J({ type: 'assistant', uuid: 'a-' + id, timestamp: ts, message: { id, role: 'assistant', model: '<synthetic>', usage: usage(0, 0, 0, 0), content: [{ type: 'text', text: 'x' }] } });
+
+const localDateTime = (ts) => {
+  const d = new Date(ts);
+  const z = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
+};
 
 function session(lines, meta) {
   const s = parseTranscript(lines.join('\n'));
@@ -77,9 +85,51 @@ test('buildReport はコンテキスト推定・上位指示・提案を返し�
   assert.ok(r.hints.some((h) => h.includes('Read')), 'ツール Read の提案');
   const md = renderMarkdown(r);
   assert.match(md, /^# トークン消費レポート/);
-  assert.match(md, /\| 1 \| 00:01 \| 大きい指示 \|/);
+  assert.ok(md.includes(`| 1 | ${formatLocalTime('2026-10-19T00:01:00Z')} | 大きい指示 |`));
   assert.match(md, /\| Read \| 1 \| 900 \|/);
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(r)));
+});
+
+test('buildReport は末尾の <synthetic> をコンテキスト推定から除外する', () => {
+  const s = session([
+    human('読んで', 'P1', '2026-10-19T00:00:00Z'),
+    assistant('m1', usage(10, 200, 300, 5), '2026-10-19T00:00:01Z'),
+    synthetic('s1', '2026-10-19T00:00:02Z'),
+  ]);
+  const r = buildReport(s);
+  assert.equal(r.context.lastTokens, 510);
+  assert.equal(r.context.model, 'claude-fable-5-1');
+  assert.equal(r.context.windowTokens, 1_000_000);
+  assert.equal(r.prompts[0].contextEnd, 510);
+});
+
+test('Markdown の期間・時刻と一覧の最終更新はローカル時間で表示する', () => {
+  const startedAt = '2026-10-19T00:00:00Z';
+  const endedAt = '2026-10-19T00:01:02Z';
+  const s = session([
+    human('読んで', 'P1', startedAt),
+    assistant('m1', usage(1, 0, 0, 1), endedAt),
+  ], { sessionId: 'LOCAL' });
+  const r = buildReport(s);
+  const md = renderMarkdown(r);
+  assert.equal(r.session.startedAt, startedAt);
+  assert.equal(r.session.endedAt, endedAt);
+  const expectedStart = localDateTime(startedAt);
+  const expectedEnd = localDateTime(endedAt);
+  assert.ok(md.includes(`期間: ${expectedStart} → ${expectedEnd}`));
+  assert.ok(md.includes(`| 0 | ${expectedStart.slice(11)} | 読んで |`));
+  assert.equal(formatLocalDateTime(null), '-');
+  assert.equal(formatLocalTime(null), '-');
+
+  const rows = listRows([s]);
+  assert.equal(rows[0].endedAt, endedAt);
+  const list = renderListMarkdown(rows, 'test');
+  assert.ok(list.includes(`| ${expectedEnd} | LOCAL |`));
+  if (new Date(startedAt).getTimezoneOffset() !== 0) {
+    assert.ok(!md.includes(startedAt.slice(0, 16)));
+    assert.ok(!md.includes(`| 0 | ${startedAt.slice(11, 16)} | 読んで |`));
+    assert.ok(!list.includes(endedAt.slice(0, 16)));
+  }
 });
 
 test('pickSession は ID 指定を優先し、無ければ cwd と同じプロジェクトの最新セッションを選ぶ', () => {

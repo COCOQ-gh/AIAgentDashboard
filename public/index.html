@@ -89,10 +89,10 @@
           <div class="legend" id="legend"></div>
           <button type="button" class="toggle" data-target="promptsTable">表で見る</button>
         </div>
-        <p class="pane-note">1 項目 = 人間の 1 指示。その指示から次の指示までに発生した API 応答の usage 合計(サブエージェント含む)。クリックでセッション詳細。</p>
+        <p class="pane-note">1 項目 = 人間の 1 指示。その指示から次の指示までに発生した API 応答の usage 合計(サブエージェント含む)。クリックでセッション詳細。期間は、期間内に始まった指示(その指示の消費は期間外の分も含む)で絞り込み、KPI・推移・内訳・モデルは期間内の API 応答で集計。</p>
         <div class="bars" id="promptBars"></div>
         <div class="tableview" id="promptsTable" hidden></div>
-        <div class="more"><button type="button" id="moreBtn" hidden>もっと見る</button></div>
+        <div class="more"><button type="button" id="moreBtn" hidden>もっと見る</button><span id="moreNote" hidden></span></div>
       </section>
 
       <section class="pane" role="tabpanel" id="pane-trend" aria-labelledby="tab-trend" hidden>
@@ -148,7 +148,7 @@
       </section>
 
       <section class="pane" role="tabpanel" id="pane-sessions" aria-labelledby="tab-sessions" hidden>
-        <p class="pane-note">クリックで指示ごとの内訳を開く。</p>
+        <p class="pane-note">クリックで指示ごとの内訳を開く。期間は、期間内に活動があったセッションで絞り込み、KPI・推移・内訳・モデルは期間内の API 応答で集計。</p>
         <div class="sessions" id="sessionList"></div>
       </section>
 

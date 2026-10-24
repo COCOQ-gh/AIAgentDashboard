@@ -18,7 +18,7 @@ npm start
 |---|---|---|
 | `CLAUDE_PROJECTS_DIR` | `~/.claude/projects` | 走査対象ディレクトリ |
 | `PORT` | `4317` | 待受ポート |
-| `HOST` | `127.0.0.1` | 待受アドレス(ローカル専用のまま使うこと) |
+| `HOST` | `127.0.0.1` | 待受アドレス(ローカル専用のまま使うこと)。名前を指定すると同じ Host hostname も許可 |
 | `AIAD_SCAN_WORKERS` | CPU 数 | 並列パースのワーカー数(`0` でワーカーを使わず逐次パース) |
 
 テスト: `npm test`
@@ -32,7 +32,8 @@ npm start
   選択したプロジェクトが全タブのフィルタを兼ねる。各行に使用内訳の細いバー
 - **上部バー** — 期間フィルタ・再走査・文字サイズ(小 / 標準 / 大。ブラウザに記憶される)
 - **KPI 帯** — 合計 / 出力 / キャッシュ読取 / キャッシュ作成 / 概算コスト(USD)/ 指示数 / セッション数。
-  指示・モデル・セッション・セッション詳細の各行にも概算 USD を出す(表ビューには「概算 USD」列)
+  期間・プロジェクトを反映した値は `/api/totals` から取得する。指示・モデル・セッション・セッション詳細の各行にも
+  概算 USD を出す(表ビューには「概算 USD」列)
 - **タブ「指示」** — トークン消費の多い指示。1 本 = 人間の 1 指示。棒は既定で**キャッシュ内訳タブと同じ分類**で塗り分ける
   (読取 = 初期コンテキスト / 指示 / アシスタント出力 / ツール別 / 要約、作成 = 初回 / 通常の追加 / モデル切替 / アイドル後 / 圧縮、
   入力、出力。ツールチップに全項目の値)。サブエージェント分は主系列の分類対象外なので灰色の「分類外」。
@@ -50,7 +51,8 @@ npm start
     ツール結果(ツール別)/ 圧縮後の要約
 - **タブ「モデル」** — モデル別の内訳(積み上げ色は同じ 4 系列)。API 応答(call)単位で集計するので、途中でモデルが切り替わった
   セッションも別々に数える。日付サフィックス付きの名前(`claude-haiku-4-5-20251001`)は同じモデルに畳み、`<synthetic>` は除く
-- **タブ「セッション」** — セッション一覧。クリックすると「セッション詳細」タブにモデル別と指示ごとの内訳(時系列)
+- **タブ「セッション」** — セッション一覧。Claude Code の `.claude/worktrees/<name>` で動いたセッションは元リポジトリにまとめる。
+  クリックすると「セッション詳細」タブにモデル別と指示ごとの内訳(時系列)
 - 各グラフは「表で見る」で同じ数値を表に切り替えられる
 
 ### 画面の実測(tools/shot.mjs)
@@ -74,6 +76,8 @@ node tools/shot.mjs --density large --script probe.mjs   # 操作後の状態を
 - **サブエージェント** = `<project>/<sessionId>/subagents/agent-*.jsonl`。先頭 user 行の `promptId` で親の指示に合流する。
 - **フォーク / 再開** = 新しいセッションファイルに履歴が丸ごと複製されるため、全ファイル横断で `message.id` を
   重複排除し、複製で中身が空になった指示は落とす(開始時刻 → ファイル更新時刻の昇順で先のファイルが所有)。
+- **worktree** = セッションの cwd が `<root>/.claude/worktrees/<name>` なら、プロジェクトキーと表示 cwd は `<root>` にそろえる。
+  元の worktree プロジェクトキーはセッションの `worktree` に残し、プロジェクトの `worktrees` には distinct 件数を出す。
 
 ## USD 概算コスト(src/pricing.mjs)
 
@@ -91,16 +95,25 @@ API 応答(call)ごとに、モデル別の単価で `入力 + 出力 + キャ�
 | パス | 内容 |
 |---|---|
 | `GET /api/overview` | プロジェクト別集計と全体合計 |
-| `GET /api/prompts?project=&since=&sort=total|output|recent&limit=` | 指示一覧 |
-| `GET /api/sessions?project=` | セッション一覧 |
+| `GET /api/totals?project=&since=` | KPI 合計(`usage` / `cost` / `unpricedCalls` / `apiCalls` / `prompts` / `sessions`) |
+| `GET /api/prompts?project=&since=&sort=total|output|recent&limit=` | 指示一覧。`limit` は最大 5000 |
+| `GET /api/sessions?project=&since=` | セッション一覧。`since` 指定時は終了時刻で絞る |
 | `GET /api/session?id=` | 1 セッションの指示別内訳 |
 | `GET /api/report?session=&top=` | AI エージェント向けレポート(下記 CLI と同じ JSON) |
 | `GET /api/breakdown?project=&since=` | キャッシュ作成の原因とキャッシュ読取の構成(src/attribution.mjs) |
 | `GET /api/models?project=&since=` | モデル別の内訳(src/models.mjs)。`/api/session` にも `modelRows` を付与 |
 | `GET /api/timeseries?project=&since=&bucket=hour\|day\|week&tz=` | 時間別 / 日別 / 週別の推移(src/timeseries.mjs)。各行の `t` は区間開始(ローカル時刻を UTC として表した擬似 epoch ms)。`tz` は UTC との差(分。ブラウザの `getTimezoneOffset`)、省略は UTC |
-
-`cost`(USD 概算)は `/api/overview`・`/api/prompts`・`/api/sessions`・`/api/session`・`/api/models`・`/api/report` の各行に付く。
 | `POST /api/rescan` | 再走査 |
+
+`since` の期間集計は、指示数を指示の開始時刻、セッション数を終了時刻(`endedAt >= since`)で判定し、usage / cost / API 呼出数は
+call の時刻で判定する。時刻の無い call は期間指定時だけ除外する。`since` が空なら全期間で、`/api/totals` の call 集計は
+`/api/overview` の全体合計と一致する。KPI 帯はこの `/api/totals` を使う。
+
+`cost`(USD 概算)は `/api/overview`・`/api/totals`・`/api/prompts`・`/api/sessions`・`/api/session`・`/api/models`・`/api/report` の各行に付く。
+
+全リクエストで `Host` hostname を検査し、`127.0.0.1` / `localhost` / `::1` 以外は 403 にする。`HOST=<name>` で
+明示的に別名へ bind した場合はその hostname も許可する(`0.0.0.0` / `::` 自体は許可 hostname にしない)。
+`POST /api/rescan` は `Origin` がある場合も同じ許可リストで検査する。
 
 ## AI エージェントから使う(CLI / スキル)
 
@@ -112,7 +125,10 @@ API 応答(call)ごとに、モデル別の単価で `入力 + 出力 + キャ�
 npm run usage                                  # $CLAUDE_CODE_SESSION_ID のセッション(無ければ cwd の最新)を Markdown で
 npm run usage -- --list                        # cwd のプロジェクトのセッション一覧
 npm run usage -- --session <id> --format json  # 機械可読
+npm run usage -- --project <key>               # cwd に関係なく、そのプロジェクトの最新セッション
 ```
+
+`--project <key>` に未知のキーを渡すと `project not found` で終了する。CLI の Markdown に出す時刻はローカル時刻。
 
 Claude Code では `/token-usage` スキル(`.claude/commands/token-usage.md`)が CLI を実行し、提案に沿って進め方を
 変える(コンテキスト 70% 超で /compact・探索はサブエージェントへ委任・大きなファイルは範囲指定で読む、など)。
@@ -124,6 +140,7 @@ Claude Code では `/token-usage` スキル(`.claude/commands/token-usage.md`)�
 - **ツール別の文脈追加** = 「次の呼出で新たに入力されたトークン(`input + cache_creation`)」を、直前の呼出が使った
   ツールへ等分した概算。ツール結果(ファイル読み込み・コマンド出力)が文脈をどれだけ増やしたかの目安。
 - **サブエージェント**(sidechain)の消費は合計に含むが、親のコンテキスト量には含めない。
+- **`<synthetic>` call** は合計には含むが、キャッシュ作成原因・モデル切替の分類とコンテキスト量の推定からは除く。
 - **キャッシュ作成の原因** = 主系列の各呼出を直前の呼出と比べて分類: model が違えば「モデル切替」、60 分超空けば
   「アイドル後(60 分超)」、文脈が 30% 超縮めば「圧縮」、5 分超空けば「アイドル後(5〜60 分)」、それ以外は「通常の追加」。
   プロンプトキャッシュはモデル別・TTL 付きなので、前三者は文脈全体の作り直しになる。

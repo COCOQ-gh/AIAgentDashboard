@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseTranscript } from '../src/parse.mjs';
-import { resolveSessions, summarizeProjects } from '../src/scan.mjs';
+import { groupWorktrees, resolveSessions, summarizeProjects } from '../src/scan.mjs';
+import { projectKeyFromCwd } from '../src/report.mjs';
 
 const J = (o) => JSON.stringify(o);
 const usage = (input, cc, cr, output) => ({ input_tokens: input, cache_creation_input_tokens: cc, cache_read_input_tokens: cr, output_tokens: output });
@@ -58,6 +59,43 @@ test('resolveSessions はキャッシュ側のオブジェクトを変更しな�
   assert.equal(b.prompts.length, 1);
   assert.equal(b.prompts[0].calls.length, 1);
   assert.equal(b.usage.total, 10);
+});
+
+test('main と Claude Code worktree はルートリポジトリの 1 プロジェクトにまとまる', () => {
+  const root = String.raw`H:\AI\HyperHelix`;
+  const worktreeCwd = String.raw`H:\AI\HyperHelix\.claude\worktrees\vibrant-archimedes-2478ce`;
+  const main = parsed([human('main', 'P1', '2026-10-18T00:00:00Z'), assistant('m1', usage(1, 0, 0, 0), '2026-10-18T00:00:01Z')].join('\n'), {
+    sessionId: 'main',
+    projectKey: projectKeyFromCwd(root),
+    cwd: root,
+  });
+  const worktree = parsed([human('worktree', 'P2', '2026-10-18T01:00:00Z'), assistant('m2', usage(2, 0, 0, 0), '2026-10-18T01:00:01Z')].join('\n'), {
+    sessionId: 'worktree',
+    projectKey: 'H--AI-HyperHelix--claude-worktrees-vibrant-archimedes-2478ce',
+    cwd: worktreeCwd,
+  });
+  const out = resolveSessions([main, worktree]);
+  assert.equal(out[0].projectKey, out[1].projectKey);
+  assert.equal(out.find((s) => s.sessionId === 'worktree').worktree, worktree.projectKey);
+  const projects = summarizeProjects(out);
+  assert.equal(projects.length, 1);
+  assert.equal(projects[0].sessions, 2);
+  assert.equal(projects[0].worktrees, 1);
+  assert.equal(projects[0].cwd, root);
+});
+
+test('groupWorktrees は通常パスを保ち、POSIX worktree もまとめ、入力を変更しない', () => {
+  const scratch = { sessionId: 'scratch', projectKey: 'scratch', cwd: String.raw`H:\scratch\worktrees\name` };
+  const posix = { sessionId: 'posix', projectKey: '-home-me-repo--claude-worktrees-feature', cwd: '/home/me/repo/.claude/worktrees/feature' };
+  const out = groupWorktrees([scratch, posix]);
+  assert.equal(out[0].projectKey, 'scratch');
+  assert.equal(out[0].projectCwd, scratch.cwd);
+  assert.equal(out[0].worktree, undefined);
+  assert.equal(out[1].projectKey, projectKeyFromCwd('/home/me/repo'));
+  assert.equal(out[1].projectCwd, '/home/me/repo');
+  assert.equal(out[1].worktree, posix.projectKey);
+  assert.equal(posix.projectCwd, undefined);
+  assert.equal(posix.worktree, undefined);
 });
 
 test('TranscriptStore.scan はワーカー並列でも逐次と同じ結果を返し、変化したファイルだけ再パースする', async () => {
