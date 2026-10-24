@@ -31,6 +31,13 @@ test('contextTokens / contextWindowFor', () => {
   assert.equal(contextTokens({ usage: { input: 10, cacheRead: 1000, cacheCreation: 200, output: 50, total: 1260 } }), 1210);
   assert.equal(contextWindowFor('claude-fable-5-1', {}), 1_000_000);
   assert.equal(contextWindowFor('claude-sonnet-4-5', {}), 200_000);
+  // 回帰(TASK-AIAgentDashboard-20261024-007): 1M のモデルを 200K と誤推定して「コンテキスト 169%」と誤報していた
+  for (const m of ['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-fable-5', 'claude-haiku-5-5', 'claude-opus-4-8[1m]']) {
+    assert.equal(contextWindowFor(m, {}), 1_000_000, m);
+  }
+  for (const m of ['claude-haiku-4-5', 'claude-haiku-4-5-20251001', 'claude-opus-4-5', 'claude-sonnet-4-5-20250929', null]) {
+    assert.equal(contextWindowFor(m, {}), 200_000, String(m));
+  }
   assert.equal(contextWindowFor('claude-fable-5-1', { AIAD_CONTEXT_WINDOW: '123' }), 123);
 });
 

@@ -20,11 +20,15 @@ export function contextTokens(call) {
   return call.usage.input + call.usage.cacheRead + call.usage.cacheCreation;
 }
 
+// 文脈窓が 1M のモデル(Anthropic のモデル一覧 2026-10-06 時点)。新しいモデルを足すときはここと src/pricing.mjs の両方を更新する。
+// 窓が 200K のモデル(Haiku 4.5・Opus 4.5 以前・Sonnet 4.5 以前)はここに載せない(既定の 200K になる)
+const WINDOW_1M = /\[1m\]|fable-5|mythos|opus-(?:5|4-[678])|sonnet-(?:5|4-6)|haiku-5/i;
+
 /** モデル名から文脈窓(トークン)を推定する。AIAD_CONTEXT_WINDOW で上書き可。 */
 export function contextWindowFor(model, env = process.env) {
   const n = Number(env.AIAD_CONTEXT_WINDOW);
   if (Number.isFinite(n) && n > 0) return n;
-  if (model && /\[1m\]|fable-5|opus-5/i.test(model)) return 1_000_000;
+  if (model && WINDOW_1M.test(model)) return 1_000_000;
   return 200_000;
 }
 
