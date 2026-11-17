@@ -5,5 +5,12 @@ node_modules/
 .claude/tmp/
 .claude/settings.local.json
 
+# 開発プロセス(HyperHelix・非公開)の手元専用ファイル。フックは settings.local.json に置く
+CLAUDE.local.md
+.claude/commands/helix.md
+.claude/commands/cycle.md
+.claude/commands/sync.md
+.claude/commands/compact-prep.md
+
 # tools/shot.mjs の出力(スクリーンショット・Chrome プロファイル)
 tmp/

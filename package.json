@@ -4,6 +4,7 @@
   "description": "Claude Code のトランスクリプト(~/.claude/projects/**/*.jsonl)から、どの指示でどれだけトークンを消費したかを可視化するローカルダッシュボード",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },

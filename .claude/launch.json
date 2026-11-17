@@ -6,6 +6,13 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["src/server.mjs"],
       "port": 4317
+    },
+    {
+      "name": "demo",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/server.mjs"],
+      "env": { "CLAUDE_PROJECTS_DIR": "tmp/demo-projects", "PORT": "4318" },
+      "port": 4318
     }
   ]
 }

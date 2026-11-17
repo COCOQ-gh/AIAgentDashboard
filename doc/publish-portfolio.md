@@ -39,7 +39,8 @@
    `.claude/settings.local.json` へ移す(`.gitignore` 済みなので公開されない)
 2. `.claude/commands/helix.md` `cycle.md` `sync.md` `compact-prep.md` を追跡から外す。手元には残したいので
    `git rm --cached` で外し、`.gitignore` に 4 ファイルを追加する。`token-usage.md` は本ツールの機能なので残す
-3. `CLAUDE.md` の「開発プロセス」節(HyperHelix のタスクループの説明)を削除する。「調査・計測・編集の作法」は
+3. `CLAUDE.md` の「開発プロセス」節(HyperHelix のタスクループの説明)を `CLAUDE.local.md`(Claude Code が読む手元専用ファイル。
+   `.gitignore` に追加)へ移す。「調査・計測・編集の作法」は
    本ツールの開発知見なので残してよい。ただし `TASK-…` の出典表記はそのまま読めるので変えなくてよい
 4. `README.md` の「開発プロセス」節を、外部の人が読める説明に書き換える。例:
    「AI エージェント(Claude Code)と自作のタスクループ(調査 → 計画 → 実行 → 評価 → 蒸留)で開発した。
@@ -118,8 +119,9 @@ git filter-branch --env-filter 'export GIT_AUTHOR_EMAIL="$(git config user.email
 ### 2-4. CI(GitHub Actions)
 
 `.github/workflows/test.yml` を追加し、push と pull request で `npm test` を回す。
-Windows 固有のパス処理(`H:\` 形式のテスト)があるので、`ubuntu-latest` と `windows-latest` の両方、
-Node.js 18 / 20 / 22 で回す。依存がないので `npm ci` は不要。
+Windows 固有のパス処理(`H:\` 形式のテスト)があるので、`ubuntu-latest` と `windows-latest` の両方で回す。
+Node.js は 22 / 24(`npm test` のグロブ指定 `node --test "test/**/*.test.mjs"` は Node 21 以降の機能のため)。
+依存がないので `npm ci` は不要。
 
 完了条件: 手元で `npm test` が通り、README を GitHub 上と同じように Markdown プレビューで読んで、
 画像とリンクが切れていない。

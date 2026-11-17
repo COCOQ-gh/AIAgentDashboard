@@ -1,5 +1,38 @@
 # AI Agent Dashboard
 
+[![test](https://github.com/COCOQ-gh/AIAgentDashboard/actions/workflows/test.yml/badge.svg)](https://github.com/COCOQ-gh/AIAgentDashboard/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Claude Code のトークン消費を「どの指示で・なぜ膨らんだか」まで分解して見せる、ローカル専用のダッシュボード。
+
+> A local, zero-dependency dashboard that reads Claude Code transcripts (`~/.claude/projects/**/*.jsonl`)
+> and shows which prompt consumed how many tokens, and why: cache rebuilds after a model switch, an idle gap
+> or a compaction, and what the re-sent context is made of. Node.js only; nothing leaves your machine.
+
+![ダッシュボードの画面(合成データ)](doc/images/dashboard.png)
+
+*画面は合成データ(`tools/make-demo-data.mjs`)で撮影したもの。*
+
+### 作った理由
+
+AI エージェントに長い作業を任せると、トークンの大半は「キャッシュ読取」、つまり毎回送り直される文脈に消える。
+合計値だけでは、どの指示・どのツール結果・どのキャッシュ作り直しが原因なのかが分からないので、
+トランスクリプトから指示単位に分解して見えるようにした。
+
+### 技術的な見どころ
+
+- **外部依存ゼロ** — Node.js 標準ライブラリだけで、サーバ・集計・画面・テストまで書いている
+- **初回走査の並列化** — `worker_threads` で CPU 数まで並列にパースし、129 ファイル / 414 MB で逐次 3.8 秒 → 1.1 秒
+  (6 コア、OS のファイルキャッシュが温まった状態)。以後は size / mtime が変わったファイルだけ再パースする
+- **キャッシュ作成の原因推定** — 呼出の間隔・モデルの切替・圧縮の記録から、作り直しを
+  初回 / モデル切替 / アイドル後 / 圧縮 / 通常の追加に分ける。キャッシュ読取も、初期コンテキスト・指示・出力・ツール別に概算する
+- **AI エージェント自身が使える** — CLI・API で「いまのセッションの消費とコンテキスト量」を返し、エージェントが作業の進め方を調整できる
+- **ローカル専用サーバとしての防御** — loopback 以外の Host、不正な Origin からの更新要求を 403 で拒否する
+- **レイアウトの実測** — 「1 画面に収まる」を目視でなく、Chrome DevTools Protocol で実ブラウザを動かして測る検査ツール(`tools/shot.mjs`)
+- **テスト** — `node:test` で 46 件。GitHub Actions で Ubuntu / Windows の両方で回す
+
+## 概要
+
 Claude Code が `~/.claude/projects/` に残すトランスクリプト(JSONL)を読み取り、
 **どの指示(プロンプト)でどれだけトークンを消費したか**をブラウザで可視化するローカルツール。
 外部依存なし(Node.js 18 以上のみ)。データは読み取り専用で、どこにも送信しない。
@@ -64,6 +97,14 @@ PNG を `tmp/`(gitignore 済み)へ保存する。`--expect-no-scroll` で 1 画
 ```bash
 node tools/shot.mjs --size 1280x720 --expect-no-scroll
 node tools/shot.mjs --density large --script probe.mjs   # 操作後の状態を測る
+```
+
+実データを写さずに撮る・試すときは、合成トランスクリプトを生成してそちらを読ませる
+(架空の 4 プロジェクト・数日分。モデル切替・アイドル・圧縮・サブエージェントを含む。シード固定):
+
+```bash
+node tools/make-demo-data.mjs --out tmp/demo-projects
+CLAUDE_PROJECTS_DIR=tmp/demo-projects PORT=4318 npm start
 ```
 
 ## 集計ルール(src/parse.mjs・src/scan.mjs)
@@ -149,4 +190,7 @@ Claude Code では `/token-usage` スキル(`.claude/commands/token-usage.md`)�
 
 ## 開発プロセス
 
-タスクは HyperHelix(`doc/HyperHelix/` にネスト)のタスクループで実行する。詳細は `CLAUDE.md`。
+AI エージェント(Claude Code)と自作のタスクループ(調査 → 計画 → 実行 → 評価 → 蒸留)で開発した。
+コミットの `TASK-…` がタスク 1 件に対応し、本文に変更内容と検証結果を書いている。
+過去のタスクで前提ズレや無駄を生んだ手順は、再発防止として `CLAUDE.md` に固定している。
+タスクループのフレームワーク本体と各タスクの詳細な作業記録は非公開。
