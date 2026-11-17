@@ -4,8 +4,8 @@
 
 ## 機能
 
-- GitHub でポートフォリオとして公開する: 手順は `doc/publish-portfolio.md`。段 0〜3 は完了(推奨案)。
-  残りは段 4(GitHub のメール公開設定 → private で作成・CI 確認 → public 化)と段 5
+- 公開リポジトリの仕上げ(`doc/publish-portfolio.md` 段 4-4・4-5): Settings → Code security で Secret scanning と
+  Push protection を有効にする(公開時点で無効だった)・プロフィールに固定表示する。どちらも GitHub 上で本人が操作
 
 ## 不具合
 
