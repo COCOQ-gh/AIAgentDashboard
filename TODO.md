@@ -4,7 +4,8 @@
 
 ## 機能
 
-- GitHub でポートフォリオとして公開する: 手順は `doc/publish-portfolio.md`。段 0 の 5 項目を決めてから段 1 から順に消化する
+- GitHub でポートフォリオとして公開する: 手順は `doc/publish-portfolio.md`。段 0〜3 は完了(推奨案)。
+  残りは段 4(GitHub のメール公開設定 → private で作成・CI 確認 → public 化)と段 5
 
 ## 不具合
 
